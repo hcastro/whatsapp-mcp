@@ -1,0 +1,66 @@
+
+> whatsapp-readonly-mcp@0.1.0 check
+> npm run typecheck && npm run lint && npm test
+
+
+> whatsapp-readonly-mcp@0.1.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+
+> whatsapp-readonly-mcp@0.1.0 lint
+> eslint src test
+
+
+> whatsapp-readonly-mcp@0.1.0 test
+> npm run build && node --experimental-test-module-mocks --test test/*.test.mjs
+
+
+> whatsapp-readonly-mcp@0.1.0 build
+> node scripts/patch-baileys.mjs && tsc -p tsconfig.json
+
+✔ Baileys normalizer extracts text, captions, edits, ephemeral and preserves exact identities (1.01375ms)
+✔ view-once and protocol payloads are not archived (0.073833ms)
+✔ unsafe media URLs and declared oversize fail before network (0.266167ms)
+✔ retry backoff bounded; terminal disconnects stop; missing presence patch blocks connection (0.214625ms)
+✔ nested view-once envelopes are excluded while nested edited documents normalize (0.080125ms)
+✔ real Baileys HTTP boundary forwards redirect rejection and cancellation (15.186209ms)
+✔ allowlist enforced at ingestion and every retrieval; live config revocation (7.23625ms)
+✔ malformed policy fails closed (2.338167ms)
+✔ duplicates, monotonic edits and tombstones survive replay and reopen (3.355792ms)
+✔ deletion before history prevents resurrection and fills timestamp (2.593083ms)
+✔ cursor paginates timestamp ties, rejects changed filters and malicious payloads (4.229459ms)
+✔ literal search resists SQL and wildcard injection; filters and context boundaries (3.632667ms)
+✔ zero matches carries explicit incomplete coverage (2.345084ms)
+✔ media cannot cross revisions, survive deletion, exceed limits, or expose a path (3.071792ms)
+✔ discovery is human-only; MCP selected list excludes unselected metadata (2.228208ms)
+✔ offline archive never creates credentials (2.093125ms)
+✔ discovered chats accept tombstones and post-clear deletion; old content stays cleared (3.369459ms)
+✔ unknown or unrelated schema is rejected without changes in both modes (3.693292ms)
+✔ changing dataDir fails closed for already-open archive (2.112208ms)
+✔ archive account binding is immutable and populated unbound archives cannot be adopted (2.185458ms)
+✔ unbound populated archive requires a fresh directory (2.021708ms)
+✔ legacy MCP 2024-11-05 client receives ordinary JSON text results over stdio (135.543792ms)
+(node:63582) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ actual sync lifecycle persists credentials and tombstones while media is stalled, aborts cleanly (65.74425ms)
+✔ terminal disconnect remains visible after cleanup (57.697583ms)
+Sync failed; stopped to avoid silent gaps. Check configuration, account binding, credentials, and archive.
+✔ reconnect factory failure is contained, preserved, and releases writer lock (1064.493583ms)
+✔ reconnect ignores stale socket events and keeps account binding across device suffixes (1187.242667ms)
+✔ different authenticated account cannot reuse the archive or open a socket (75.650917ms)
+✔ shutdown awaits one async socket end before saving credentials and releasing handles/lock (56.038167ms)
+✔ async shutdown rejection is contained and local lock still releases (52.524875ms)
+✔ actual media transfer decrypts synthetic bytes and enforces streaming byte limit (20.120667ms)
+✔ abort after response headers reaches decrypted stream without hanging or unhandled source error (0.948083ms)
+✔ stopping the decrypted stream cancels its upstream response body (0.867375ms)
+✔ real SDK client and child stdio server: tools, structured/text parity, errors, dynamic policy (157.195875ms)
+✔ linking refused without explicit flag; offline sync refused without credentials (664.188083ms)
+✔ installed transport boundary suppresses all presence/chatstate/read stanzas but retains sync delivery traffic (3.020833ms)
+ℹ tests 35
+ℹ suites 0
+ℹ pass 35
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2783.102959
