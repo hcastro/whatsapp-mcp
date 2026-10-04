@@ -1,4 +1,6 @@
-# WhatsApp read-only MCP
+# WhatsApp MCP
+
+Repository: [hcastro/whatsapp-mcp](https://github.com/hcastro/whatsapp-mcp).
 
 A local TypeScript archive for **explicitly selected conversations**, with an offline stdio MCP server for Codex. It is implemented and tested with synthetic data; **no WhatsApp account has been linked or live history coverage verified**.
 
@@ -7,7 +9,7 @@ Requires Node **24+** (uses built-in `node:sqlite`). Developed and tested on mac
 ## Setup
 
 ```sh
-cd /path/to/whatsapp-readonly-mcp
+cd /path/to/whatsapp-mcp
 npm ci --ignore-scripts
 npm run check
 node dist/cli.js init
@@ -63,7 +65,7 @@ After approval to change persistent Codex configuration, add a stdio MCP entry w
 ```toml
 [mcp_servers.whatsapp_readonly]
 command = "/absolute/path/to/node"
-args = ["/absolute/path/to/whatsapp-readonly-mcp/dist/cli.js", "serve", "--config", "/absolute/path/to/whatsapp-readonly-mcp/config.json"]
+args = ["/absolute/path/to/whatsapp-mcp/dist/cli.js", "serve", "--config", "/absolute/path/to/whatsapp-mcp/config.json"]
 ```
 
 Use `command -v node` to resolve the actual binary. The MCP process is offline and opens the archive in SQLite read-only mode. Run `sync` separately while you want updates. The implementation does not edit Codex config or start a background service.
@@ -80,9 +82,13 @@ Use `command -v node` to resolve the actual binary. The MCP process is offline a
 
 Times in messages/search filters are Unix **seconds**; sync observations are Unix **milliseconds**. Search is oldest first, ordered by `(timestamp, stable ID)`. Keep filters unchanged when using a cursor. SQLite’s `lower` is ASCII-only; non-ASCII text still matches literally with original casing. Cursors are not snapshots: concurrent backfill/edits may change results; restart a search after sync for a fresh view. Maximum 100 results, 50 neighbors per side, 500 query characters.
 
+The SDK serves modern MCP `2026-07-28` over stdio, including `server/discover`, per-request capability metadata, result type/identity fields, and private cache hints with zero TTL. The same entry point supports legacy initialization; `2025-11-25` and `2024-11-05` are tested. Account access and selection remain deliberate local configuration, with no Tasks or elicitation tools.
+
 All tools declare output schemas and return the same JSON in `structuredContent` and a text block for older clients. Tools are read-only, non-destructive, idempotent, and closed-world annotated. There are no resources exposing paths and no network/media-download tools. Chat contents and attachments are untrusted data, not instructions.
 
 Media caching is off by default. Enable `cacheMedia` locally before sync to download supported images/video/audio/documents/stickers, up to the configured limit (hard maximum 4 MiB). MIME strings are metadata; returned bytes are not rendered/executed. Downloads run separately from durable message/credential writes, with at most 128 pending jobs. A full queue leaves excess attachments explicitly unavailable; replayed messages may retry later. Downloads are bounded, time-limited, confined to HTTPS WhatsApp hosts, and reject redirects. Media may have expired; the implementation does not request reuploads. View-once content is excluded. Ephemeral messages delivered to the client can be archived and retained; automatic retention expiry is not implemented. Unsupported polls, reactions, location cards and rich interactive content are not fully indexed.
+
+The pinned SDK rejects unsupported versions when opening a connection. Once a modern stdio connection is established, its SDK pins the protocol era and does not reject a different version string on a later request. Missing required metadata is rejected. This upstream interoperability limitation does not change archive authorization; all tool handlers still enforce the live allowlist. See [migration assessment](docs/MCP-V2.md).
 
 ## Coverage and live validation
 
@@ -92,7 +98,7 @@ Before relying on it, compare known recent and older messages in each selected c
 
 ## Dependency verification and local guard
 
-Pinned with a lockfile: `@whiskeysockets/baileys` **7.0.0-rc14**, official `@modelcontextprotocol/sdk` **1.32.0**. Registry latest/legacy tags were independently checked on 2026-10-04. The current Baileys release is a release candidate; the latest legacy version at verification was 6.7.24. GHSA-qvv5-jq5g-4cgg is patched starting at 6.7.22 / 7.0.0-rc12 ([GitHub advisory](https://github.com/advisories/GHSA-qvv5-jq5g-4cgg)). Structured output and text compatibility follow the [official MCP tool specification](https://modelcontextprotocol.io/specification/2025-06-18/server/tools).
+Pinned with a lockfile: `@whiskeysockets/baileys` **7.0.0-rc14**, official `@modelcontextprotocol/server` and test-only `@modelcontextprotocol/client` **2.3.0**. Registry latest/legacy tags were independently checked on 2026-10-04. The current Baileys release is a release candidate; the latest legacy version at verification was 6.7.24. GHSA-qvv5-jq5g-4cgg is patched starting at 6.7.22 / 7.0.0-rc12 ([GitHub advisory](https://github.com/advisories/GHSA-qvv5-jq5g-4cgg)). Structured output and text compatibility follow the [official MCP tool specification](https://modelcontextprotocol.io/specification/2026-07-28/server/tools).
 
 `npm run build` applies version-specific local guards to the pinned Baileys installation:
 

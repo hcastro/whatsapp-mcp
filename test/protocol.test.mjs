@@ -4,8 +4,8 @@ import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { Archive, messageId } from "../dist/archive.js";
 import { configPolicy } from "../dist/config.js";
 test("real SDK client and child stdio server: tools, structured/text parity, errors, dynamic policy", async (t) => {
@@ -40,16 +40,15 @@ test("real SDK client and child stdio server: tools, structured/text parity, err
     args: [resolve("dist/cli.js"), "serve", "--config", path],
     stderr: "pipe",
   });
-  let negotiatedProtocol;
-  transport.setProtocolVersion = (version) => {
-    negotiatedProtocol = version;
-  };
-  const client = new Client({ name: "offline-verification", version: "1.0.0" });
+  const client = new Client(
+    { name: "offline-verification", version: "1.0.0" },
+    { versionNegotiation: { mode: { pin: "2026-07-28" } } },
+  );
   t.after(async () => {
     await client.close();
   });
   await client.connect(transport);
-  assert.equal(negotiatedProtocol, "2025-11-25");
+  assert.equal(client.getProtocolEra(), "modern");
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map((x) => x.name).sort(), [
     "conversation_context",

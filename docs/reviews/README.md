@@ -13,3 +13,13 @@ Round 3 independently reverified its fixes: 11/11 targeted tests passed, with **
 Live linking, actual conversation selection and older-history comparison remain separate approval-dependent validation steps, not completed reviews or claimed test results.
 
 The precommit [source-comment audit](code-comments.md) applies the actual `code-comments` skill found through its symlink. Its comment-only refinements and the explicit current protocol negotiation assertion passed the full 35-test check before publication.
+
+## SDK v2 migration reviews
+
+The original reviews above remain the historical evidence for the archive and sync implementation. A subsequent SDK migration adds modern protocol `2026-07-28` while retaining legacy clients. Three additional focused independent reviews inspect the migration against the original published commit; the [migration assessment](../MCP-V2.md) records design choices and the upstream version-validation limitation.
+
+- [Migration round 1](migration-round-1.md): approved; final verification documentation marked in progress pending evidence refresh.
+- [Migration round 2](migration-round-2.md): approved; independent factory-recovery, defaults, pagination and validation probes passed.
+- [Migration round 3](migration-round-3.md): approved; full 44-test check and independent archive-close counting across probe fallback, EOF and both signals passed.
+
+All three focused rounds approved the migration. Final evidence was regenerated after the last review; the full 44-test check passed again. The changed comments received explicit KEEP AS-IS verdicts in every focused review.

@@ -1,5 +1,5 @@
 {
-  "name": "whatsapp-readonly-mcp",
+  "name": "whatsapp-mcp",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -16,11 +16,11 @@
     "start": "node dist/cli.js serve"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.32.0",
     "@whiskeysockets/baileys": "7.0.0-rc14",
     "pino": "9.14.0",
     "qrcode-terminal": "0.12.0",
-    "zod": "4.6.5"
+    "zod": "4.6.5",
+    "@modelcontextprotocol/server": "2.3.0"
   },
   "devDependencies": {
     "@types/node": "26.6.4",
@@ -28,6 +28,7 @@
     "eslint": "10.12.0",
     "prettier": "3.6.2",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.71.0"
+    "typescript-eslint": "8.71.0",
+    "@modelcontextprotocol/client": "2.3.0"
   }
 }

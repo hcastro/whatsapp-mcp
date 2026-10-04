@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, writeFileSync } from "node:fs";
 import { resolve, join } from "node:path";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { configPolicy, privateDirectory } from "./config.js";
 import { Archive } from "./archive.js";
 import { createServer } from "./server.js";
@@ -46,24 +46,26 @@ async function main() {
     return;
   }
   if (command === "serve") {
-    const archive = new Archive(path, policy, true);
-    const server = createServer(archive);
-    let closed = false;
-    const close = async () => {
-      if (closed) return;
-      closed = true;
-      await server.close();
-      archive.close();
-    };
-    process.once("SIGTERM", () => void close());
-    process.once("SIGINT", () => void close());
-    server.server.onclose = () => {
-      if (!closed) {
-        closed = true;
-        archive.close();
-      }
-    };
-    await server.connect(new StdioServerTransport());
+    const handle = serveStdio(
+      () => {
+        // Discovery can discard an instance before a legacy connection opens its own archive.
+        const archive = new Archive(path, policy, true);
+        try {
+          const server = createServer(archive);
+          server.server.onclose = () => archive.close();
+          return server;
+        } catch (error) {
+          archive.close();
+          throw error;
+        }
+      },
+      {
+        legacy: "serve",
+        onerror: () => process.stderr.write("MCP transport error.\n"),
+      },
+    );
+    process.once("SIGTERM", () => void handle.close());
+    process.once("SIGINT", () => void handle.close());
     return;
   }
   if (command === "chats") {
