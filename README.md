@@ -19,7 +19,7 @@ node dist/cli.js init
 
 ## Account linking — explicit human approval required
 
-This step has **not** been executed. Linking grants a persistent WhatsApp linked-device session to the separate sync process, which must receive/decrypt protocol data before filtering. The allowlist limits this archive and MCP retrieval; it does not constrain the linked-device credentials themselves. Discovery stores chat IDs/names for all chats delivered by WhatsApp. WhatsApp may send history beyond the chosen chats in memory; unselected message bodies are discarded before persistence.
+User-approved linking attempts have not completed; live validation is still pending. Linking grants a persistent WhatsApp linked-device session to the separate sync process, which must receive/decrypt protocol data before filtering. The allowlist limits this archive and MCP retrieval; it does not constrain the linked-device credentials themselves. Discovery stores chat IDs/names for all chats delivered by WhatsApp. WhatsApp may send history beyond the chosen chats in memory; unselected message bodies are discarded before persistence.
 
 Baileys is an unofficial WhatsApp client. Protocol changes may break it; account restrictions are possible. Sync necessarily sends authentication, delivery acknowledgments, key exchange, and history/app-state synchronization traffic. “Read-only” means no application message sending, read marking, presence broadcasting, or account/group changes. It does not mean a passive network connection.
 
@@ -30,6 +30,8 @@ node dist/cli.js link --accept-unofficial-client
 ```
 
 Scan the terminal QR via WhatsApp → Linked devices. QR codes are not saved. Credentials and cryptographic keys persist in `.local/auth.sqlite`; they are sensitive and can grant broad account access. Stop with Ctrl-C. A single sync writer is enforced by `sync.lock`; if a crash leaves it behind, verify that its PID is no longer running before removing that lock manually.
+
+Each sync/link startup verifies the current WhatsApp Web version from `https://web.whatsapp.com/sw.js` before opening a WhatsApp socket. The request rejects redirects and times out after 10 seconds. Failure stops startup with a clear error; there is no silent fallback to the bundled version. Reconnects within that process reuse the verified version. The offline MCP server makes no version request.
 
 For older history, select known chat IDs **before the first link** where possible. A discovery-only first link with an empty selection discards message bodies. Selecting later does not request replay of those bodies; a fresh user-approved relink into a new empty data directory with the chosen IDs already configured may deliver history again, but cannot guarantee it.
 
@@ -117,4 +119,4 @@ npm audit --omit=dev
 
 Tests use Node’s experimental module-mocking facility only to replace the network socket with synthetic events; production startup does not enable it.
 
-See [design](docs/DESIGN.md), [three sequential reviews](docs/reviews/README.md), and their per-round evidence. No publishing, push, PR, background agent, WhatsApp account access, or persistent Codex credential/config changes are part of offline implementation.
+See [design](docs/DESIGN.md), [three sequential reviews](docs/reviews/README.md), and their per-round evidence. Tests use synthetic data and do not link an account. The private repository contains only source, tests and sanitized documentation; local credentials, archives and configuration are excluded. Persistent Codex configuration and background services are not installed automatically.

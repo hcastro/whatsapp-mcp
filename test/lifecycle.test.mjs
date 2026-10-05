@@ -5,6 +5,7 @@ import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import qrcode from "qrcode-terminal";
 import { Archive, messageId } from "../dist/archive.js";
 import { configPolicy } from "../dist/config.js";
 
@@ -19,7 +20,12 @@ mock.module("@whiskeysockets/baileys", {
   defaultExport: (options) => {
     if (failConnect) throw new Error("synthetic connect failure");
     const ev = new EventEmitter();
-    const socket = { ev, options, end: () => endAction() };
+    const socket = {
+      ev,
+      ws: new EventEmitter(),
+      options,
+      end: () => endAction(),
+    };
     sockets.push(socket);
     return socket;
   },
@@ -37,6 +43,10 @@ mock.module("../dist/media.js", {
       });
     },
   },
+});
+let versionAction = async () => [2, 3000, 1234567890];
+mock.module("../dist/wa-version.js", {
+  namedExports: { resolveWebVersion: (signal) => versionAction(signal) },
 });
 const { sync } = await import("../dist/sync.js");
 function setup(t) {
@@ -72,6 +82,7 @@ test("actual sync lifecycle persists credentials and tombstones while media is s
   const { dir, policy } = setup(t);
   mediaStarted = false;
   const running = sync(policy, false);
+  await new Promise((resolve) => setImmediate(resolve));
   const socket = sockets.at(-1);
   socket.ev.emit("chats.upsert", [
     { id: "111@s.whatsapp.net", name: "Selected" },
@@ -106,6 +117,7 @@ test("actual sync lifecycle persists credentials and tombstones while media is s
 test("terminal disconnect remains visible after cleanup", async (t) => {
   const { dir, policy } = setup(t);
   const running = sync(policy, false);
+  await new Promise((resolve) => setImmediate(resolve));
   const socket = sockets.at(-1);
   socket.ev.emit("connection.update", {
     connection: "close",
@@ -120,6 +132,7 @@ test("terminal disconnect remains visible after cleanup", async (t) => {
 test("reconnect factory failure is contained, preserved, and releases writer lock", async (t) => {
   const { dir, policy } = setup(t);
   const running = sync(policy, false);
+  await new Promise((resolve) => setImmediate(resolve));
   const rejected = assert.rejects(running, /Sync failed/);
   const socket = sockets.at(-1);
   failConnect = true;
@@ -140,6 +153,7 @@ test("reconnect factory failure is contained, preserved, and releases writer loc
 test("reconnect ignores stale socket events and keeps account binding across device suffixes", async (t) => {
   const { dir, policy } = setup(t);
   const running = sync(policy, false);
+  await new Promise((resolve) => setImmediate(resolve));
   const old = sockets.at(-1);
   old.ev.emit("connection.update", {
     connection: "close",
@@ -189,6 +203,7 @@ test("shutdown awaits one async socket end before saving credentials and releasi
     endAction = () => Promise.resolve();
   });
   const running = sync(policy, false);
+  await new Promise((resolve) => setImmediate(resolve));
   let resolved = false;
   running.then(() => {
     resolved = true;
@@ -225,8 +240,132 @@ test("async shutdown rejection is contained and local lock still releases", asyn
     endAction = () => Promise.resolve();
   });
   const running = sync(policy, false);
+  await new Promise((resolve) => setImmediate(resolve));
   const rejected = assert.rejects(running, /Socket shutdown failed/);
   process.emit("SIGTERM");
   await rejected;
+  assert.equal(existsSync(join(dir, "sync.lock")), false);
+});
+
+test("link diagnostics retain only stages and numeric disconnect reasons; fresh QR replaces terminal contents", async (t) => {
+  const { dir, policy } = setup(t);
+  const tty = Object.getOwnPropertyDescriptor(process.stderr, "isTTY");
+  Object.defineProperty(process.stderr, "isTTY", {
+    value: true,
+    configurable: true,
+  });
+  t.after(() => {
+    if (tty) Object.defineProperty(process.stderr, "isTTY", tty);
+    else delete process.stderr.isTTY;
+  });
+  const displayed = [];
+  const output = mock.method(process.stderr, "write", (chunk) => {
+    displayed.push(chunk);
+    return true;
+  });
+  const qr = mock.method(qrcode, "generate", (_value, _options, done) =>
+    done("synthetic display"),
+  );
+  t.after(() => {
+    output.mock.restore();
+    qr.mock.restore();
+  });
+  const running = sync(policy, true);
+  await new Promise((resolve) => setImmediate(resolve));
+  const socket = sockets.at(-1);
+  const reader = new DatabaseSync(join(dir, "archive.sqlite"), {
+    readOnly: true,
+  });
+  const diagnostics = () =>
+    Object.fromEntries(
+      reader
+        .prepare(
+          "SELECT key,value FROM status WHERE key IN ('linking','lastDisconnect','pairingProtocol')",
+        )
+        .all()
+        .map(({ key, value }) => [key, JSON.parse(value)]),
+    );
+  try {
+    socket.ev.emit("connection.update", { qr: "SECRET-QR-SENTINEL" });
+    assert.equal(diagnostics().linking.stage, "qr-ready");
+    assert.equal(qr.mock.calls[0].arguments[0], "SECRET-QR-SENTINEL");
+    assert.deepEqual(socket.options.version, [2, 3000, 1234567890]);
+    socket.ws.emit("CB:notification,type:companion_reg_refresh", {
+      attrs: { from: "SECRET-IDENTITY-SENTINEL" },
+      content: "SECRET-REFRESH-SENTINEL",
+    });
+    assert.equal(
+      typeof diagnostics().pairingProtocol.companionRefreshAt,
+      "number",
+    );
+    assert.equal(diagnostics().pairingProtocol.pairSuccessAt, null);
+    socket.ws.emit("CB:iq,,pair-success", { content: "SECRET-PAIR-SENTINEL" });
+    assert.equal(typeof diagnostics().pairingProtocol.pairSuccessAt, "number");
+    assert.ok(displayed.includes("\u001b[3J\u001b[2J\u001b[H"));
+    assert.ok(displayed.some((value) => value.includes("Fresh QR generated")));
+    socket.ev.emit("connection.update", { isNewLogin: true });
+    assert.equal(diagnostics().linking.stage, "paired");
+    socket.ev.emit("connection.update", {
+      connection: "close",
+      lastDisconnect: {
+        error: {
+          output: { statusCode: 408 },
+          message: "SECRET-ERROR-SENTINEL",
+        },
+      },
+    });
+    const status = diagnostics();
+    assert.equal(status.lastDisconnect.code, 408);
+    assert.equal(status.linking.stage, "disconnected");
+    assert.equal(JSON.stringify(status).includes("SECRET"), false);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    assert.notEqual(sockets.at(-1), socket);
+    assert.deepEqual(diagnostics().pairingProtocol, status.pairingProtocol);
+    socket.ws.emit("CB:notification,type:companion_reg_refresh", {});
+    assert.deepEqual(diagnostics().pairingProtocol, status.pairingProtocol);
+  } finally {
+    process.emit("SIGTERM");
+    await running;
+    reader.close();
+  }
+});
+
+test("version lookup failure opens no socket and releases the writer lock", async (t) => {
+  const { dir, policy } = setup(t);
+  const count = sockets.length;
+  versionAction = async () => {
+    throw new Error("Could not verify Web version");
+  };
+  t.after(() => {
+    versionAction = async () => [2, 3000, 1234567890];
+  });
+  await assert.rejects(sync(policy, false), /Could not verify Web version/);
+  assert.equal(sockets.length, count);
+  assert.equal(existsSync(join(dir, "sync.lock")), false);
+  const reader = new Archive(join(dir, "archive.sqlite"), policy, true);
+  assert.equal(reader.coverage().sync.connection.state, "error");
+  reader.close();
+});
+
+test("shutdown cancels version lookup without opening a socket or retaining a lock", async (t) => {
+  const { dir, policy } = setup(t);
+  const count = sockets.length;
+  let lookupSignal;
+  versionAction = (signal) =>
+    new Promise((_resolve, reject) => {
+      lookupSignal = signal;
+      signal.addEventListener("abort", () => reject(new Error("aborted")), {
+        once: true,
+      });
+    });
+  t.after(() => {
+    versionAction = async () => [2, 3000, 1234567890];
+  });
+  const running = sync(policy, false);
+  assert.equal(lookupSignal.aborted, false);
+  process.emit("SIGTERM");
+  await running;
+  assert.equal(lookupSignal.aborted, true);
+  assert.equal(sockets.length, count);
   assert.equal(existsSync(join(dir, "sync.lock")), false);
 });

@@ -12,6 +12,7 @@ import makeWASocket, {
   DisconnectReason,
   jidNormalizedUser,
   type WAMessage,
+  type WAVersion,
 } from "@whiskeysockets/baileys";
 import pino from "pino";
 import qrcode from "qrcode-terminal";
@@ -20,6 +21,7 @@ import { openAuth } from "./auth.js";
 import { privateDirectory, type Policy } from "./config.js";
 import { normalize } from "./normalize.js";
 import { fetchMedia } from "./media.js";
+import { resolveWebVersion } from "./wa-version.js";
 
 export function retryDelay(attempt: number, reason?: number): number | null {
   if (
@@ -62,7 +64,7 @@ export async function sync(policy: Policy, allowLink: boolean): Promise<void> {
   let attempt = 0;
   let failure: Error | undefined;
   let socketClosing: Promise<void> | undefined;
-  const abortMedia = new AbortController();
+  const abortWork = new AbortController();
   const mediaJobs: { raw: WAMessage; record: IncomingMessage }[] = [];
   let mediaWork: Promise<void> | undefined;
   let finish: () => void = () => {};
@@ -95,7 +97,7 @@ export async function sync(policy: Policy, allowLink: boolean): Promise<void> {
     stopped = true;
     failure = error;
     if (timer) clearTimeout(timer);
-    abortMedia.abort();
+    abortWork.abort();
     mediaJobs.length = 0;
     try {
       archive?.setStatus("connection", { state, at: Date.now() });
@@ -152,7 +154,7 @@ export async function sync(policy: Policy, allowLink: boolean): Promise<void> {
           const bytes = await fetchMedia(
             job.raw,
             current.maxMediaBytes,
-            abortMedia.signal,
+            abortWork.signal,
           );
           if (!stopped)
             store.cacheMedia(job.record.id, bytes, job.record.revision);
@@ -186,9 +188,15 @@ export async function sync(policy: Policy, allowLink: boolean): Promise<void> {
         if (record.mediaType && policy().cacheMedia) queueMedia(raw, record);
       }
     };
+    const pairingStages = {
+      companionRefreshAt: null as number | null,
+      pairSuccessAt: null as number | null,
+    };
+    if (allowLink) store.setStatus("pairingProtocol", pairingStages);
     const connect = () => {
       store.setStatus("connection", { state: "connecting", at: Date.now() });
       const current = makeWASocket({
+        version,
         auth: session.state,
         logger: pino({ level: "silent" }),
         markOnlineOnConnect: false,
@@ -208,6 +216,18 @@ export async function sync(policy: Policy, allowLink: boolean): Promise<void> {
           requireAccount();
           action();
         });
+      if (allowLink) {
+        for (const [event, stage] of [
+          ["CB:notification,type:companion_reg_refresh", "companionRefreshAt"],
+          ["CB:iq,,pair-success", "pairSuccessAt"],
+        ] as const)
+          current.ws.on(event, () =>
+            accept(() => {
+              pairingStages[stage] = Date.now();
+              store.setStatus("pairingProtocol", pairingStages);
+            }),
+          );
+      }
       current.ev.on("creds.update", () =>
         accept(() => {
           session.save();
@@ -288,16 +308,22 @@ export async function sync(policy: Policy, allowLink: boolean): Promise<void> {
               );
               return;
             }
+            store.setStatus("linking", { stage: "qr-ready", at: Date.now() });
+            // Remove superseded QR codes so a phone cannot scan an expired code from scrollback.
+            process.stderr.write("\u001b[3J\u001b[2J\u001b[H");
             process.stderr.write(
-              "Scan with WhatsApp → Linked devices. QR and session access are sensitive.\n",
+              `Fresh QR generated at ${new Date().toLocaleTimeString()}. Scan with WhatsApp → Linked devices.\nQR codes rotate automatically; scan only the code currently displayed.\n`,
             );
             qrcode.generate(event.qr, { small: true }, (code) =>
               process.stderr.write(code + "\n"),
             );
           }
+          if (event.isNewLogin)
+            store.setStatus("linking", { stage: "paired", at: Date.now() });
           if (event.connection === "open") {
             requireAccount();
             attempt = 0;
+            store.setStatus("linking", { stage: "linked", at: Date.now() });
             store.setStatus("connection", {
               state: "connected",
               at: Date.now(),
@@ -310,7 +336,18 @@ export async function sync(policy: Policy, allowLink: boolean): Promise<void> {
             const error = event.lastDisconnect?.error as
               | { output?: { statusCode?: number } }
               | undefined;
-            const delay = retryDelay(attempt++, error?.output?.statusCode);
+            const code = error?.output?.statusCode;
+            store.setStatus("lastDisconnect", {
+              code:
+                typeof code === "number" && Number.isFinite(code) ? code : null,
+              at: Date.now(),
+            });
+            if (allowLink)
+              store.setStatus("linking", {
+                stage: "disconnected",
+                at: Date.now(),
+              });
+            const delay = retryDelay(attempt++, code);
             if (delay === null) {
               stop(
                 "needs-relink",
@@ -336,12 +373,30 @@ export async function sync(policy: Policy, allowLink: boolean): Promise<void> {
       () => safely(() => store.setStatus("heartbeat", Date.now())),
       15_000,
     );
+    store.setStatus("connection", {
+      state: "resolving-version",
+      at: Date.now(),
+    });
+    let version: WAVersion;
+    try {
+      version = await resolveWebVersion(abortWork.signal);
+    } catch (error) {
+      if (stopped) return;
+      store.setStatus("connection", { state: "error", at: Date.now() });
+      throw error;
+    }
+    if (stopped) return;
+    store.setStatus("webVersion", {
+      version,
+      source: "web.whatsapp.com",
+      at: Date.now(),
+    });
     safely(connect);
     await done;
     await mediaWork;
   } finally {
     stopped = true;
-    abortMedia.abort();
+    abortWork.abort();
     if (timer) clearTimeout(timer);
     if (heartbeat) clearInterval(heartbeat);
     process.off("SIGINT", onSignal);

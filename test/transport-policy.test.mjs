@@ -27,6 +27,33 @@ test("installed transport boundary suppresses all presence/chatstate/read stanza
   await sendNode({ tag: "receipt", attrs: { type: "inactive" } });
   await sendNode({ tag: "iq", attrs: { type: "get" } });
   assert.equal(sent.length, 2);
+  const pairingFrames = [
+    {
+      tag: "iq",
+      attrs: { type: "result", to: "s.whatsapp.net", id: "fixture-pair" },
+    },
+    {
+      tag: "iq",
+      attrs: { type: "result", id: "fixture-success" },
+      content: [
+        {
+          tag: "pair-device-sign",
+          attrs: {},
+          content: Buffer.from("synthetic-signature"),
+        },
+      ],
+    },
+    {
+      tag: "ack",
+      attrs: {
+        class: "notification",
+        type: "companion_reg_refresh",
+        id: "fixture-refresh",
+      },
+    },
+  ];
+  for (const frame of pairingFrames) await sendNode(frame);
+  assert.deepEqual(sent.slice(2), pairingFrames);
   // Credential updates can trigger presence even when automatic online status is disabled.
   sent.length = 0;
   const listenerStart = source.indexOf("ev.on('creds.update', update => {");

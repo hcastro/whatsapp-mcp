@@ -23,3 +23,5 @@ The original reviews above remain the historical evidence for the archive and sy
 - [Migration round 3](migration-round-3.md): approved; full 44-test check and independent archive-close counting across probe fallback, EOF and both signals passed.
 
 All three focused rounds approved the migration. Final evidence was regenerated after the last review; the full 44-test check passed again. The changed comments received explicit KEEP AS-IS verdicts in every focused review.
+
+## Linking compatibility follow-up
