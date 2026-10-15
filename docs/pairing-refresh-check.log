@@ -1,0 +1,85 @@
+
+> whatsapp-mcp@0.1.0 check
+> npm run typecheck && npm run lint && npm test
+
+
+> whatsapp-mcp@0.1.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+
+> whatsapp-mcp@0.1.0 lint
+> eslint src test
+
+
+> whatsapp-mcp@0.1.0 test
+> npm run build && node --experimental-test-module-mocks --test test/*.test.mjs
+
+
+> whatsapp-mcp@0.1.0 build
+> node scripts/patch-baileys.mjs && tsc -p tsconfig.json
+
+✔ Baileys normalizer extracts text, captions, edits, ephemeral and preserves exact identities (0.974167ms)
+✔ view-once and protocol payloads are not archived (0.07275ms)
+✔ unsafe media URLs and declared oversize fail before network (0.282958ms)
+✔ retry backoff bounded; terminal disconnects stop; missing presence patch blocks connection (0.2645ms)
+✔ nested view-once envelopes are excluded while nested edited documents normalize (0.076667ms)
+✔ real Baileys HTTP boundary forwards redirect rejection and cancellation (15.949583ms)
+✔ allowlist enforced at ingestion and every retrieval; live config revocation (8.65675ms)
+✔ malformed policy fails closed (2.302084ms)
+✔ duplicates, monotonic edits and tombstones survive replay and reopen (3.766709ms)
+✔ deletion before history prevents resurrection and fills timestamp (2.203583ms)
+✔ cursor paginates timestamp ties, rejects changed filters and malicious payloads (3.811458ms)
+✔ literal search resists SQL and wildcard injection; filters and context boundaries (6.246208ms)
+✔ zero matches carries explicit incomplete coverage (2.32825ms)
+✔ media cannot cross revisions, survive deletion, exceed limits, or expose a path (4.026167ms)
+✔ discovery is human-only; MCP selected list excludes unselected metadata (3.123041ms)
+✔ offline archive never creates credentials (2.283792ms)
+✔ discovered chats accept tombstones and post-clear deletion; old content stays cleared (5.167292ms)
+✔ unknown or unrelated schema is rejected without changes in both modes (4.214583ms)
+✔ changing dataDir fails closed for already-open archive (2.631166ms)
+✔ archive account binding is immutable and populated unbound archives cannot be adopted (2.698667ms)
+✔ unbound populated archive requires a fresh directory (2.61975ms)
+✔ legacy MCP 2024-11-05 retains structured/text parity and exits on EOF (135.789334ms)
+✔ legacy MCP 2025-11-25 retains structured/text parity and exits on EOF (122.083083ms)
+(node:13301) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ actual sync lifecycle persists credentials and tombstones while media is stalled, aborts cleanly (70.09875ms)
+✔ terminal disconnect remains visible after cleanup (63.64025ms)
+Sync failed; stopped to avoid silent gaps. Check configuration, account binding, credentials, and archive.
+✔ reconnect factory failure is contained, preserved, and releases writer lock (1070.208584ms)
+✔ reconnect ignores stale socket events and keeps account binding across device suffixes (1187.476584ms)
+✔ different authenticated account cannot reuse the archive or open a socket (81.363083ms)
+✔ shutdown awaits one async socket end before saving credentials and releasing handles/lock (56.832917ms)
+✔ async shutdown rejection is contained and local lock still releases (57.220375ms)
+✔ link diagnostics retain only stages and numeric disconnect reasons; fresh QR replaces terminal contents (1169.154708ms)
+✔ version lookup failure opens no socket and releases the writer lock (82.346458ms)
+✔ shutdown cancels version lookup without opening a socket or retaining a lock (55.666458ms)
+✔ actual media transfer decrypts synthetic bytes and enforces streaming byte limit (20.081ms)
+✔ abort after response headers reaches decrypted stream without hanging or unhandled source error (1.07475ms)
+✔ stopping the decrypted stream cancels its upstream response body (1.137416ms)
+✔ modern stdio discovery, private uncached schemas, errors and reads without initialization (142.351458ms)
+✔ discovery followed by legacy initialization creates a usable replacement archive (124.425708ms)
+✔ stdio EOF exits cleanly before a server instance opens (106.429042ms)
+✔ stdio EOF exits cleanly after modern call (111.787542ms)
+✔ stdio SIGINT exits cleanly before a server instance opens (109.843291ms)
+✔ stdio SIGINT exits cleanly after modern call (114.930458ms)
+✔ stdio SIGTERM exits cleanly before a server instance opens (107.423ms)
+✔ stdio SIGTERM exits cleanly after modern call (114.61525ms)
+✔ QR credentials resume by paired identity without a registration flag; provisional credentials cannot sync (16.437292ms)
+✔ installed pairing handlers persist refreshed secrets before QR display, retain refs and keys, and keep timer cadence (14.302083ms)
+✔ refresh is inert before QR, for malformed nodes, during closed transport and after identity assignment (7.971125ms)
+✔ installed ACK path works before login and retains message sender after login (0.733083ms)
+✔ real SDK client and child stdio server: tools, structured/text parity, errors, dynamic policy (278.035667ms)
+✔ linking refused without explicit flag; offline sync refused without credentials (674.340375ms)
+✔ installed transport boundary suppresses all presence/chatstate/read stanzas but retains sync delivery traffic (4.505875ms)
+✔ Web version uses the official endpoint, bounds the request and forbids redirects (19.408167ms)
+✔ failed, malformed and unsafe version responses never use the bundled fallback (0.782667ms)
+✔ version lookup contains raw network errors and propagates cancellation to fetch (0.231542ms)
+ℹ tests 54
+ℹ suites 0
+ℹ pass 54
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4129.397083

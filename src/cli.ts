@@ -4,6 +4,7 @@ import { resolve, join } from "node:path";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { configPolicy, privateDirectory } from "./config.js";
 import { Archive } from "./archive.js";
+import { requestLive } from "./live.js";
 import { createServer } from "./server.js";
 
 process.umask(0o077);
@@ -25,6 +26,7 @@ async function main() {
       JSON.stringify(
         {
           dataDir: ".local",
+          access: "account",
           allowedChats: [],
           cacheMedia: false,
           maxMediaBytes: 4194304,
@@ -51,7 +53,9 @@ async function main() {
         // Discovery can discard an instance before a legacy connection opens its own archive.
         const archive = new Archive(path, policy, true);
         try {
-          const server = createServer(archive);
+          const server = createServer(archive, (request) =>
+            requestLive(config.dataDir, request),
+          );
           server.server.onclose = () => archive.close();
           return server;
         } catch (error) {

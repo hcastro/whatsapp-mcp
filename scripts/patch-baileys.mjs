@@ -31,6 +31,43 @@ const guards = [
     replacement:
       "pipeline(fetched, output, () => {}); // whatsapp-readonly-mcp: link errors and cancellation across both streams.\n    return output;",
   },
+  {
+    file: "Socket/messages-recv.js",
+    original: "buildAckStanza(node, errorCode, authState.creds.me.id)",
+    replacement: "buildAckStanza(node, errorCode, authState.creds.me?.id)",
+  },
+  {
+    file: "Socket/socket.js",
+    original:
+      "// QR gen\n    ws.on('CB:iq,type:set,pair-device', async (stanza) => {",
+    replacement: `// A registration refresh retires the advertised secret without expiring the current QR ref.
+    let redrawPairingQR;
+    ws.on('CB:notification,type:companion_reg_refresh', (node) => {
+        if (closed || !ws.isOpen || creds.me || creds.registered || !redrawPairingQR) return;
+        if (!getBinaryNodeChild(node, 'companion_reg_refresh') && !getBinaryNodeChild(node, 'pair-device-rotate-qr')) return;
+        creds.advSecretKey = randomBytes(32).toString('base64');
+        ev.emit('creds.update', { advSecretKey: creds.advSecretKey });
+        redrawPairingQR();
+    });
+    // QR gen
+    ws.on('CB:iq,type:set,pair-device', async (stanza) => {`,
+  },
+  {
+    file: "Socket/socket.js",
+    original: "const advB64 = creds.advSecretKey;",
+    replacement:
+      "// Read the current secret when rendering; a refresh can replace it between QR refs.",
+  },
+  {
+    file: "Socket/socket.js",
+    original:
+      "const qr = buildPairingQRData(ref, noiseKeyB64, identityKeyB64, advB64, browser);\n            ev.emit('connection.update', { qr });",
+    replacement: `redrawPairingQR = () => {
+                const qr = buildPairingQRData(ref, noiseKeyB64, identityKeyB64, creds.advSecretKey, browser);
+                ev.emit('connection.update', { qr });
+            };
+            redrawPairingQR();`,
+  },
 ];
 // Only patch the reviewed upstream text; fail on any changed implementation.
 for (const guard of guards) {

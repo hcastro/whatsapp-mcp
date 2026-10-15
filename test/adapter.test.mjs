@@ -66,6 +66,8 @@ test("retry backoff bounded; terminal disconnects stop; missing presence patch b
   assert.equal(retryDelay(0, 440), null);
   assert.equal(retryDelay(0, 408), 1000);
   assert.equal(retryDelay(100, 408), 60000);
+  assert.equal(retryDelay(100, 515), 0);
+  assert.equal(retryDelay(0, 515), 0);
   const patched = readFileSync(
     "node_modules/@whiskeysockets/baileys/lib/Socket/chats.js",
     "utf8",

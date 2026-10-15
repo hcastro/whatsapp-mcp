@@ -53,7 +53,7 @@ test("allowlist enforced at ingestion and every retrieval; live config revocatio
   save();
   assert.equal(archive.search({}).messages.length, 0);
   assert.equal(archive.coverage().storedMessages, 0);
-  assert.deepEqual(archive.selectedChats(), []);
+  assert.deepEqual(archive.availableChats(), []);
   assert.throws(() => archive.context(a.id));
   assert.throws(() => archive.media(a.id));
   assert.throws(() => archive.search({ chatId: A }));
@@ -161,7 +161,7 @@ test("discovery is human-only; MCP selected list excludes unselected metadata", 
     { id: B, name: "Private" },
   ]);
   assert.equal(archive.discoveredChats().length, 2);
-  assert.deepEqual(archive.selectedChats(), [{ id: A, name: "Selected" }]);
+  assert.deepEqual(archive.availableChats(), [{ id: A, name: "Selected" }]);
 });
 test("offline archive never creates credentials", (t) => {
   const { dir } = fixture(t);

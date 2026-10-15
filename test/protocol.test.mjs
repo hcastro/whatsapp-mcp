@@ -53,7 +53,10 @@ test("real SDK client and child stdio server: tools, structured/text parity, err
   assert.deepEqual(tools.map((x) => x.name).sort(), [
     "conversation_context",
     "get_media",
+    "list_chats",
     "list_selected_chats",
+    "read_attachment",
+    "read_conversation",
     "search_messages",
     "sync_coverage",
   ]);

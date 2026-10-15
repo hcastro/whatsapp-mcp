@@ -38,7 +38,8 @@ export function openAuth(path: string, allowLink: boolean) {
     creds = initAuthCreds();
     write("creds", creds);
   }
-  if (!creds.registered && !allowLink) {
+  // QR pairing assigns an identity without setting the separate registration flag.
+  if (!creds.me?.id && !allowLink) {
     db.close();
     throw new Error("Session is not linked; use explicit link command");
   }

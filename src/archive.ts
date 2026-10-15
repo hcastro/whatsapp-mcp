@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
-import type { Policy } from "./config.js";
+import { chatAllowed, type Policy } from "./config.js";
+import { ContactDirectory, contactSchema } from "./contacts.js";
+import type { Contact } from "@whiskeysockets/baileys";
 
 export interface Message {
   id: string;
@@ -14,6 +16,7 @@ export interface Message {
   edited: boolean;
   mediaType: string | null;
   mimeType: string | null;
+  fileName?: string | null;
 }
 export interface IncomingMessage extends Message {
   revision: number;
@@ -48,6 +51,7 @@ function message(row: Row): Message {
 /** Every query rechecks selected chats; replayed history cannot restore revoked content. */
 export class Archive {
   private db: DatabaseSync;
+  private contacts?: ContactDirectory;
   constructor(
     path: string,
     private policy: Policy,
@@ -71,7 +75,7 @@ export class Archive {
         version.user_version === 0 && owner.application_id === 0 && empty;
       if (
         (!fresh &&
-          (version.user_version !== 1 ||
+          (![1, 2, 3].includes(version.user_version) ||
             owner.application_id !== 0x57414d43)) ||
         (readOnly && fresh)
       ) {
@@ -93,6 +97,22 @@ export class Archive {
         PRAGMA application_id=0x57414d43;
         PRAGMA user_version=1;
         COMMIT;`);
+      if (!readOnly)
+        this.db.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE IF NOT EXISTS attachment_sources (
+          messageId TEXT PRIMARY KEY REFERENCES messages(id), revision INTEGER NOT NULL,
+          payload BLOB NOT NULL, fileName TEXT);
+        CREATE TRIGGER IF NOT EXISTS invalidate_attachment AFTER UPDATE ON messages
+          WHEN NEW.deleted=1 OR NEW.revision>OLD.revision BEGIN
+          DELETE FROM attachment_sources WHERE messageId=NEW.id;
+        END;
+        ${contactSchema}
+        PRAGMA user_version=3;
+        COMMIT;
+      `);
+      if (!readOnly || version.user_version === 3)
+        this.contacts = new ContactDirectory(this.db);
     } catch (error) {
       this.db.close();
       throw error;
@@ -122,8 +142,14 @@ export class Archive {
       );
     this.setStatus("account", fingerprint);
   }
+  hasAccountAccess(): boolean {
+    return this.policy().access === "account";
+  }
+  private canRead(chatId: string): boolean {
+    return chatAllowed(this.policy(), chatId);
+  }
   private allowed(chatId: string): void {
-    if (!this.policy().allowedChats.includes(chatId))
+    if (!this.canRead(chatId))
       throw new Error("Chat unavailable or not selected");
   }
   private scope(chatId?: string): { sql: string; values: SQLInputValue[] } {
@@ -132,6 +158,7 @@ export class Archive {
       this.allowed(chatId);
       return { sql: "chatId=?", values: [chatId] };
     }
+    if (this.policy().access === "account") return { sql: "1=1", values: [] };
     return {
       sql: `chatId IN (${ids.map(() => "?").join(",") || "NULL"})`,
       values: ids,
@@ -143,20 +170,61 @@ export class Archive {
     );
     for (const chat of chats) if (chat.id) stmt.run(chat.id, chat.name || null);
   }
-  /** Local human-only discovery; deliberately not exposed by MCP. */
+  /** Returns discovered chat metadata; callers must apply the current access policy before exposing it. */
   discoveredChats(): unknown[] {
     return this.db.prepare("SELECT id,name FROM chats ORDER BY name,id").all();
   }
-  selectedChats(): unknown[] {
-    return this.policy().allowedChats.map((id) => ({
-      id,
-      ...(this.db.prepare("SELECT name FROM chats WHERE id=?").get(id) ?? {
-        name: null,
-      }),
-    }));
+  contactRecovery(): { state?: string; at?: number } | undefined {
+    const row = this.db
+      .prepare("SELECT value FROM status WHERE key='contactRecovery'")
+      .get() as { value: string } | undefined;
+    return row ? JSON.parse(row.value) : undefined;
+  }
+  contactGeneration(): number {
+    return this.contacts?.generation ?? 0;
+  }
+  recoverContacts(contacts: Partial<Contact>[], generation: number): void {
+    if (!this.contacts)
+      throw new Error("Contact storage requires sync migration");
+    this.contacts.recover(contacts, generation);
+  }
+  updateContacts(contacts: Partial<Contact>[]): void {
+    if (!this.contacts)
+      throw new Error("Contact storage requires sync migration");
+    this.contacts.update(contacts);
+  }
+  mapContact(pair: { pn: string; lid: string }): void {
+    if (!this.contacts)
+      throw new Error("Contact storage requires sync migration");
+    this.contacts.map(pair);
+  }
+  findChats(query = "") {
+    const chats = (
+      this.discoveredChats() as { id: string; name: string | null }[]
+    ).filter((chat) => this.canRead(chat.id));
+    for (const id of this.policy().allowedChats) {
+      if (this.canRead(id) && !chats.some((chat) => chat.id === id))
+        chats.push({ id, name: null });
+    }
+    return this.contacts
+      ? this.contacts.find(chats, query)
+      : chats
+          .filter(
+            (chat) =>
+              !query ||
+              (chat.name ?? "").toLowerCase().includes(query.toLowerCase()),
+          )
+          .map((chat) => ({
+            ...chat,
+            identityId: chat.id,
+            matchedNames: chat.name ? [chat.name] : [],
+          }));
+  }
+  availableChats(): { id: string; name: string | null }[] {
+    return this.findChats().map(({ id, name }) => ({ id, name }));
   }
   ingest(input: IncomingMessage): boolean {
-    if (!this.policy().allowedChats.includes(input.chatId)) return false;
+    if (!this.canRead(input.chatId)) return false;
     if (input.id !== messageId(input.chatId, input.sourceId, input.fromMe))
       throw new Error("Invalid message identity");
     const cleared = this.db
@@ -216,7 +284,7 @@ export class Archive {
     });
   }
   clearChat(chatId: string): void {
-    if (!this.policy().allowedChats.includes(chatId)) return;
+    if (!this.canRead(chatId)) return;
     this.db.exec("BEGIN IMMEDIATE");
     try {
       this.db
@@ -362,6 +430,103 @@ export class Archive {
       messages: [...before.reverse(), anchor, ...after].map(message),
       coverage: this.coverage(anchor.chatId),
     };
+  }
+  recordHistory(chatIds: Iterable<string>) {
+    for (const chatId of new Set(chatIds)) {
+      if (!this.canRead(chatId)) continue;
+      this.setStatus(
+        `history-generation:${chatId}`,
+        this.historyGeneration(chatId) + 1,
+      );
+    }
+  }
+  historyGeneration(chatId: string): number {
+    this.allowed(chatId);
+    const row = this.db
+      .prepare("SELECT value FROM status WHERE key=?")
+      .get(`history-generation:${chatId}`) as { value: string } | undefined;
+    return row ? Number(JSON.parse(row.value)) : 0;
+  }
+  recent(chatId: string, limit = 50, cursor?: string) {
+    this.allowed(chatId);
+    let tail = "";
+    const values: SQLInputValue[] = [chatId];
+    if (cursor) {
+      const value = JSON.parse(Buffer.from(cursor, "base64url").toString()) as {
+        chatId: string;
+        timestamp: number;
+        id: string;
+      };
+      if (
+        cursor.length > 1024 ||
+        value.chatId !== chatId ||
+        !Number.isSafeInteger(value.timestamp) ||
+        !/^[a-f0-9]{64}$/.test(value.id)
+      )
+        throw new Error("Invalid conversation cursor");
+      tail = "AND (timestamp<? OR (timestamp=? AND id<?))";
+      values.push(value.timestamp, value.timestamp, value.id);
+    }
+    const count = Math.max(1, Math.min(limit, 100));
+    const rows = this.db
+      .prepare(
+        `SELECT ${columns},(SELECT fileName FROM attachment_sources WHERE messageId=messages.id) AS fileName FROM messages WHERE chatId=? AND deleted=0 ${tail} ORDER BY timestamp DESC,id DESC LIMIT ?`,
+      )
+      .all(...values, count + 1) as unknown as Row[];
+    const page = rows.slice(0, count);
+    const oldest = page.at(-1);
+    return {
+      messages: page.reverse().map(message),
+      nextCursor: oldest
+        ? Buffer.from(
+            JSON.stringify({
+              chatId,
+              timestamp: oldest.timestamp,
+              id: oldest.id,
+            }),
+          ).toString("base64url")
+        : null,
+      coverage: this.coverage(chatId),
+    };
+  }
+  saveAttachmentSource(
+    id: string,
+    revision: number,
+    payload: Uint8Array,
+    fileName?: string | null,
+  ) {
+    const scope = this.scope();
+    if (payload.byteLength > 2 * 1024 * 1024) return;
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO attachment_sources(messageId,revision,payload,fileName)
+      SELECT id,revision,?,? FROM messages WHERE id=? AND ${scope.sql} AND deleted=0 AND revision=? AND mediaType IS NOT NULL`,
+      )
+      .run(
+        payload,
+        fileName?.slice(0, 250) ?? null,
+        id,
+        ...scope.values,
+        revision,
+      );
+  }
+  attachmentSource(id: string) {
+    const scope = this.scope();
+    const row = this.db
+      .prepare(
+        `SELECT a.payload,a.fileName,m.revision,m.chatId FROM attachment_sources a JOIN messages m ON a.messageId=m.id
+      WHERE m.id=? AND ${scope.sql} AND m.deleted=0 AND a.revision=m.revision`,
+      )
+      .get(id, ...scope.values) as
+      | {
+          payload: Uint8Array;
+          fileName: string | null;
+          revision: number;
+          chatId: string;
+        }
+      | undefined;
+    if (!row) throw new Error("Attachment source unavailable or not selected");
+    return row;
   }
   cacheMedia(id: string, bytes: Buffer, expectedRevision: number): void {
     const scope = this.scope();

@@ -1,122 +1,130 @@
 # WhatsApp MCP
 
-Repository: [hcastro/whatsapp-mcp](https://github.com/hcastro/whatsapp-mcp).
+Local, read-only access to WhatsApp conversations on the user’s direction. Account access synchronizes available conversations locally; a restricted selected-chat mode remains available. A persistent linked-device sync process receives updates and owns credentials. The stdio MCP uses a private local connection to that process for live conversation and attachment reads, and SQLite for indexed searches.
 
-A local TypeScript archive for **explicitly selected conversations**, with an offline stdio MCP server for Codex. It is implemented and tested with synthetic data; **no WhatsApp account has been linked or live history coverage verified**.
+## Start and connect
 
-Requires Node **24+** (uses built-in `node:sqlite`). Developed and tested on macOS with Node 25.7.0. No server port, cloud service, telemetry, sending tool, read receipts, group administration, presence tool, or tool-based configuration changes.
-
-## Setup
+Requires Node 24+ on macOS. Dependencies are pinned in package-lock.json.
 
 ```sh
-cd /path/to/whatsapp-mcp
 npm ci --ignore-scripts
 npm run check
 node dist/cli.js init
 ```
 
-`init` creates `config.json` and `.local/archive.sqlite`, with an empty allowlist. It does **not** connect to WhatsApp or create account credentials. Paths in configuration are resolved relative to its file. Changing `dataDir` requires restarting both processes; running handles fail closed on a directory change. Each archive binds to the authenticated account; a different account requires a new empty directory. Use `--config /absolute/path/config.json` with any command. Data is private to the current macOS user (directory 0700, new files 0600); use FileVault and do not commit or sync this directory to cloud storage. It is not application-level encrypted.
-
-## Account linking — explicit human approval required
-
-User-approved linking attempts have not completed; live validation is still pending. Linking grants a persistent WhatsApp linked-device session to the separate sync process, which must receive/decrypt protocol data before filtering. The allowlist limits this archive and MCP retrieval; it does not constrain the linked-device credentials themselves. Discovery stores chat IDs/names for all chats delivered by WhatsApp. WhatsApp may send history beyond the chosen chats in memory; unselected message bodies are discarded before persistence.
-
-Baileys is an unofficial WhatsApp client. Protocol changes may break it; account restrictions are possible. Sync necessarily sends authentication, delivery acknowledgments, key exchange, and history/app-state synchronization traffic. “Read-only” means no application message sending, read marking, presence broadcasting, or account/group changes. It does not mean a passive network connection.
-
-After the user explicitly approves that access, run manually in an interactive terminal:
+`init` creates a private local data directory with account-wide read access. Existing configurations without an `access` field retain selected-chat mode. Configuration paths are relative to the config file. Credentials grant linked-device account access; pairing requires user approval and uses an unofficial WhatsApp client (Baileys).
 
 ```sh
-node dist/cli.js link --accept-unofficial-client
+# Only after approving persistent account linking:
+node dist/cli.js link --accept-unofficial-client --config /absolute/config.json
+
+# Subsequent starts reuse credentials without a QR:
+node dist/cli.js sync --config /absolute/config.json
+
+# The MCP is a separate stdio process:
+node dist/cli.js serve --config /absolute/config.json
 ```
 
-Scan the terminal QR via WhatsApp → Linked devices. QR codes are not saved. Credentials and cryptographic keys persist in `.local/auth.sqlite`; they are sensitive and can grant broad account access. Stop with Ctrl-C. A single sync writer is enforced by `sync.lock`; if a crash leaves it behind, verify that its PID is no longer running before removing that lock manually.
+Keep sync running for live access. This repository does not install a background service or modify Codex configuration. A stopped or disconnected sync process causes live reads to return an error. No stale content is silently substituted for a live result.
 
-Each sync/link startup verifies the current WhatsApp Web version from `https://web.whatsapp.com/sw.js` before opening a WhatsApp socket. The request rejects redirects and times out after 10 seconds. Failure stops startup with a clear error; there is no silent fallback to the bundled version. Reconnects within that process reuse the verified version. The offline MCP server makes no version request.
+Pairing diagnostics retain bounded lifecycle events, without QR values, keys or protocol payloads. The post-pairing 515 restart reconnects immediately. Other transient disconnects use bounded backoff; terminal authentication failures stop. Inspect the phone's linked-device list before relinking. Do not delete credentials while sync is running. Revoke account access by unlinking from the phone; deleting files alone does not revoke access.
 
-For older history, select known chat IDs **before the first link** where possible. A discovery-only first link with an empty selection discards message bodies. Selecting later does not request replay of those bodies; a fresh user-approved relink into a new empty data directory with the chosen IDs already configured may deliver history again, but cannot guarantee it.
-
-Then inspect the local discovery catalog:
+## Select conversations
 
 ```sh
-node dist/cli.js chats
+node dist/cli.js chats --config /absolute/config.json
 ```
 
-Edit `config.json` deliberately; do not use display names as security identifiers:
+In `access: "account"` mode, use `list_chats` to find whichever conversation the user names; no per-chat authorization edit is needed. Search includes saved contact names, chat titles, verified business names, push names and usernames, ignoring case, accents and repeated whitespace. Results expose matched names and an identity ID when WhatsApp explicitly maps a phone-number ID to a LID; this does not grant access to another chat or merge their histories. Distinct identities sharing a name require disambiguation. Use `access: "selected"` with exact IDs in `allowedChats` to restrict the connector. The configuration is rechecked on each operation. Removing selection blocks retrieval immediately, including after an in-flight attachment request. It does not securely erase already stored data.
 
 ```json
 {
   "dataDir": ".local",
-  "allowedChats": ["EXACT_CHAT_ID_FROM_CHATS"],
+  "access": "account",
+  "allowedChats": [],
   "cacheMedia": false,
   "maxMediaBytes": 4194304
 }
 ```
 
-Replace the placeholder with an actual `…@s.whatsapp.net`, `…@lid`, or `…@g.us` ID. PN and LID identities remain separate, with no automatic authorization expansion. If the same person appears under both, review and select both deliberately. Device suffixes are normalized. Group participants are retained as sender IDs; there is no guessed identity merge.
+Discovery stores chat IDs and contact metadata. Contact events and history contacts are retained; a bounded startup recovery reads the contact snapshot when its completion marker is absent. Recovery validates snapshot/patch integrity, skips newer contact changes, and does not replay read-state/privacy actions, reset credentials or require relinking. Failures remain retryable and do not disable ordinary sync.
 
-```sh
-node dist/cli.js sync
-```
+Discovery stores chat IDs and names. In selected mode, unselected message bodies and attachment descriptors are discarded before persistence. In account mode, available conversation data is retained for later user-directed reads. WhatsApp may deliver wider history to the linked client before this filter runs. PN/LID identities are not automatically merged into authorization. Each archive is bound to one account.
 
-Sync requires an existing registered session; it never silently starts linking. Removing a chat from config blocks retrieval immediately. Historical content already stored remains on disk; removal is not secure erasure. Selection changes do not retroactively recover previously discarded history. Newly selected chats may receive only future messages until WhatsApp sends history again. Stop sync and unlink from the phone when revoking access. Removing local files alone does not revoke the linked device. If relinking is required after logout, use a new empty data directory and keep the old archive separately; do not reuse another account’s archive or delete credentials while sync is running.
+In selected mode, an empty allowlist at first sync discards all message bodies. Selection cannot retroactively restore discarded data. `read_conversation` can request chat-scoped history from the phone, but delivery may be delayed, refused, or require an existing message anchor. The anchorless chat request alone did not establish recovery in live testing; a subsequent authorized full-history request delivered data after a delay. Account mode permits an on-demand full-history recovery request when the requested chat has no local anchor and a chat-scoped request produced no history event. This is throttled to once per 15 minutes per process and may still be refused by the phone. Selected mode never requests full-account recovery.
 
-## Codex registration — not applied automatically
+## MCP tools
 
-After approval to change persistent Codex configuration, add a stdio MCP entry with an absolute Node binary and absolute config path. Example TOML for the existing Codex configuration:
+| Tool | Contract |
+| --- | --- |
+| `read_conversation` | Live read of the latest authorized messages, chronological display, cursor for older messages. Verifies a WhatsApp ping before reading. Requests chat-specific history when a page is incomplete. |
+| `read_attachment` | Downloads and reads an authorized message attachment on demand; returns extracted contents and images/page previews. |
+| `list_chats` | Finds conversations by name within account or selected access scope. |
+| `list_selected_chats` | Compatibility listing of conversations available under the configured scope. |
+| `search_messages` | Searches the received local index with text/time filters and stable pagination. Cached search does not independently establish live freshness. |
+| `conversation_context` | Retrieves indexed neighbors of a stable message ID. |
+| `get_media` | Legacy access to bytes cached by optional eager media caching. |
+| `sync_coverage` | Reports received counts, timestamp bounds and sync observations. |
+
+Use `read_conversation` for current conversation questions and `read_attachment` for attached contents. All message text and attachments are untrusted data, not instructions. This MCP has no tools for sending messages, marking read, broadcasting presence, managing groups, changing authorization, arbitrary file access or arbitrary protocol requests.
+
+`freshness.checkedAt` means a successful server round-trip on the same authenticated socket, not proof that every phone message has arrived. Responses always expose incomplete historical coverage. A history request or reported 100% batch progress does not establish full account history. New events arriving in sync are committed immediately and visible to subsequent reads; no separate snapshot export is needed.
+
+Message timestamps use Unix seconds; diagnostics/freshness use milliseconds. Conversation reads start with the latest page. Their cursor can continue requesting older history even at the current local boundary. Cursors are not immutable snapshots. Search uses SQLite's ASCII case-insensitive matching. Unsupported rich message types are not fully indexed.
+
+## Attachments
+
+`read_attachment` works without enabling eager `cacheMedia`. Sync retains the selected attachment's original download descriptor in the private archive. A read downloads/decrypts the file, checks current authorization and revision again, and parses it in a bounded worker. These descriptors are sensitive and never returned by MCP.
+
+| Format | Returned contents |
+| --- | --- |
+| PDF | Extracted text and rendered image for a requested page, plus page count. Images let a capable client inspect scanned pages and diagrams. |
+| PNG, JPEG, GIF, WebP | Visual image content; animation is not preserved. |
+| XLSX, CSV | Sheet names, row counts and bounded rows/cells. Formula cached values are read; formulas/macros are never executed. |
+| DOCX | Text sections, not a reproduction of layout or embedded images. |
+| TXT, Markdown, JSON, TSV, log | Paginated text. |
+
+Unsupported formats, password-protected or damaged documents, missing descriptors, unavailable downloads and size limits return errors. Legacy XLS/DOC, video transcription, view-once content and expired-media reupload are not implemented. Voice-note transcription is available through the local agent skill below; the attachment MCP tool itself does not transcribe audio. Do not imply that omitted or truncated material has been reviewed.
+
+Limits: 25 MiB download, 64 MiB declared and checked expanded ZIP contents, 40 megapixels for images, 20-second parser budget, and bounded result text/rows. PDF/image previews are resized to at most 1600 pixels on the long edge. Spreadsheet pages currently show up to 100 rows and 50 columns and report truncation. `page`, `sheet` and `startRow` choose sections. Optional eager caching remains separately limited by `maxMediaBytes` (at most 4 MiB).
+
+## Local storage and operations
+
+`.local` is private to the macOS user; credentials and archives are not application-level encrypted. Use FileVault. Never publish these files. The private Unix socket allows only validated read operations. A shared 60-second operation deadline cancels downloads/parsing on expiry or client disconnect; transport allows response overhead. The exclusive sync lock prevents multiple writers; verify a recorded PID has stopped before recovering a stale lock. Schema 1/2 archives migrate transactionally to schema 3 for attachment descriptors and contact names. Unknown schema ownership/versions are rejected.
+
+Baileys must send authentication, key exchange, delivery acknowledgments and history requests. Read-only concerns application actions, not absence of network traffic. Version-specific guarded dependency patches suppress automatic presence/read receipts and preserve media transfer cancellation, and implement the reviewed pairing compatibility fixes. Build checks fail if expected source changes.
+
+## Codex registration
+
+No persistent Codex configuration has been changed. Once authorized, register the stdio command using absolute paths:
 
 ```toml
-[mcp_servers.whatsapp_readonly]
-command = "/absolute/path/to/node"
-args = ["/absolute/path/to/whatsapp-mcp/dist/cli.js", "serve", "--config", "/absolute/path/to/whatsapp-mcp/config.json"]
+[mcp_servers.whatsapp]
+command = "/opt/homebrew/bin/node"
+args = ["/absolute/whatsapp-mcp/dist/cli.js", "serve", "--config", "/absolute/whatsapp-mcp/config.json"]
 ```
 
-Use `command -v node` to resolve the actual binary. The MCP process is offline and opens the archive in SQLite read-only mode. Run `sync` separately while you want updates. The implementation does not edit Codex config or start a background service.
+The official SDK supports modern MCP and tested legacy clients. Tools expose structured outputs with text compatibility; attachment previews are MCP image blocks and require an image-capable client.
 
-## Tools
+## Agent skill
 
-| Tool                   | Behavior                                                                          |
-| ---------------------- | --------------------------------------------------------------------------------- |
-| `list_selected_chats`  | Only allowlisted IDs/names and coverage                                           |
-| `search_messages`      | Literal substring search, optional chat/time bounds, stable ID, cursor pagination |
-| `conversation_context` | Chronological neighbors around a stable ID, including deletion tombstones         |
-| `get_media`            | Selected message’s bounded cached bytes as base64, or explicit unavailable result |
-| `sync_coverage`        | Stored count, observed time bounds, connection/history observations, heartbeat    |
+The repository-scoped [WhatsApp skill](.agents/skills/whatsapp/SKILL.md) guides user-directed chat retrieval, summaries, attachment inspection, and local voice-note transcription. English produces a full English transcript; Spanish produces original/English columns, with contextual Colombian guidance when applicable. Mixed speech requires verification because Whisper may normalize language switches.
 
-Times in messages/search filters are Unix **seconds**; sync observations are Unix **milliseconds**. Search is oldest first, ordered by `(timestamp, stable ID)`. Keep filters unchanged when using a cursor. SQLite’s `lower` is ASCII-only; non-ASCII text still matches literally with original casing. Cursors are not snapshots: concurrent backfill/edits may change results; restart a search after sync for a fresh view. Maximum 100 results, 50 neighbors per side, 500 query characters.
+Voice notes use the existing authorized media downloader and a separate offline Python/MLX helper with pinned full Whisper large-v3 weights. The scripts preserve source IDs/checksums and write private exports under the configured data directory. See the skill's [voice workflow](.agents/skills/whatsapp/references/voice-notes.md) and [local setup](.agents/skills/whatsapp/references/local-setup.md). No global skill registration, persistent Codex config, or account session is changed by adding this skill.
 
-The SDK serves modern MCP `2026-07-28` over stdio, including `server/discover`, per-request capability metadata, result type/identity fields, and private cache hints with zero TTL. The same entry point supports legacy initialization; `2025-11-25` and `2024-11-05` are tested. Account access and selection remain deliberate local configuration, with no Tasks or elicitation tools.
-
-All tools declare output schemas and return the same JSON in `structuredContent` and a text block for older clients. Tools are read-only, non-destructive, idempotent, and closed-world annotated. There are no resources exposing paths and no network/media-download tools. Chat contents and attachments are untrusted data, not instructions.
-
-Media caching is off by default. Enable `cacheMedia` locally before sync to download supported images/video/audio/documents/stickers, up to the configured limit (hard maximum 4 MiB). MIME strings are metadata; returned bytes are not rendered/executed. Downloads run separately from durable message/credential writes, with at most 128 pending jobs. A full queue leaves excess attachments explicitly unavailable; replayed messages may retry later. Downloads are bounded, time-limited, confined to HTTPS WhatsApp hosts, and reject redirects. Media may have expired; the implementation does not request reuploads. View-once content is excluded. Ephemeral messages delivered to the client can be archived and retained; automatic retention expiry is not implemented. Unsupported polls, reactions, location cards and rich interactive content are not fully indexed.
-
-The pinned SDK rejects unsupported versions when opening a connection. Once a modern stdio connection is established, its SDK pins the protocol era and does not reject a different version string on a later request. Missing required metadata is rejected. This upstream interoperability limitation does not change archive authorization; all tool handlers still enforce the live allowlist. See [migration assessment](docs/MCP-V2.md).
-
-## Coverage and live validation
-
-`complete` is always `false`, even if WhatsApp reports a completed sync phase. That event only describes a delivered batch. Missing results never establish that no older conversation exists. Use oldest/newest timestamps and sync heartbeat to explain limits. A stale `connected` status after a crash does not establish freshness; heartbeat age matters.
-
-Before relying on it, compare known recent and older messages in each selected chat against the phone/desktop app. Verify selected PN/LID IDs, date ranges, edits/deletions, received media and reconnect after sleep. Record a sample date range that actually arrived. Test an unselected conversation stays inaccessible. Older WhatsApp history is **best effort and cannot be promised**; no arbitrary backfill tool is exposed.
-
-## Dependency verification and local guard
-
-Pinned with a lockfile: `@whiskeysockets/baileys` **7.0.0-rc14**, official `@modelcontextprotocol/server` and test-only `@modelcontextprotocol/client` **2.3.0**. Registry latest/legacy tags were independently checked on 2026-10-04. The current Baileys release is a release candidate; the latest legacy version at verification was 6.7.24. GHSA-qvv5-jq5g-4cgg is patched starting at 6.7.22 / 7.0.0-rc12 ([GitHub advisory](https://github.com/advisories/GHSA-qvv5-jq5g-4cgg)). Structured output and text compatibility follow the [official MCP tool specification](https://modelcontextprotocol.io/specification/2026-07-28/server/tools).
-
-`npm run build` applies version-specific local guards to the pinned Baileys installation:
-
-- Reject outbound presence/chatstate and read/played receipts at the common stanza-send boundary, including automatic credential-update presence. Also remove the redundant connection-time presence call.
-- Preserve redirect/abort options in the HTTP helper.
-- Link media streams with Node’s pipeline so aborts, source failures and output cancellation propagate and clean up both ends.
-
-Build fails if the expected upstream source changes; sync refuses to start unless every guard is present. See `scripts/patch-baileys.mjs`. Reassess these guards on every dependency upgrade. `npm ci --ignore-scripts` avoids dependency lifecycle scripts; the package is used from its published build. The guards do not block authentication, key exchange, delivery acknowledgments or history/app-state protocol traffic.
-
-## Validation and design evidence
+Python verification (use an environment with the speech dependencies and FFmpeg on PATH):
 
 ```sh
-npm run check       # strict typecheck, ESLint, build, synthetic tests, real MCP stdio client
+PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s test -p test_voice_transcription.py -v
+```
+
+[Skill design, evaluations, and four review rounds](docs/reviews/whatsapp-skill.md).
+
+## Verification
+
+```sh
+npm run check
 npm audit --omit=dev
 ```
 
-Tests use Node’s experimental module-mocking facility only to replace the network socket with synthetic events; production startup does not enable it.
-
-See [design](docs/DESIGN.md), [three sequential reviews](docs/reviews/README.md), and their per-round evidence. Tests use synthetic data and do not link an account. The private repository contains only source, tests and sanitized documentation; local credentials, archives and configuration are excluded. Persistent Codex configuration and background services are not installed automatically.
+See `docs/DESIGN.md`, `docs/reviews/`, and their check logs. Tests are synthetic unless explicitly labeled as live observations. Acceptance requires comparing actual selected-chat messages, updates and attachments against the phone. Pairing alone is not completion.

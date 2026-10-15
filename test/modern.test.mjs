@@ -39,7 +39,7 @@ test(
     checkComplete(listed.result);
     assert.equal(listed.result.ttlMs, 0);
     assert.equal(listed.result.cacheScope, "private");
-    assert.equal(listed.result.tools.length, 5);
+    assert.equal(listed.result.tools.length, 8);
     for (const tool of listed.result.tools) {
       assert.ok(tool.outputSchema);
       assert.equal(tool.annotations.readOnlyHint, true);

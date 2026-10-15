@@ -1,0 +1,132 @@
+
+> whatsapp-mcp@0.1.0 check
+> npm run typecheck && npm run lint && npm test
+
+
+> whatsapp-mcp@0.1.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+
+> whatsapp-mcp@0.1.0 lint
+> eslint src test
+
+
+> whatsapp-mcp@0.1.0 test
+> npm run build && node --experimental-test-module-mocks --test test/*.test.mjs
+
+
+> whatsapp-mcp@0.1.0 build
+> node scripts/patch-baileys.mjs && tsc -p tsconfig.json
+
+✔ Baileys normalizer extracts text, captions, edits, ephemeral and preserves exact identities (1.042125ms)
+✔ view-once and protocol payloads are not archived (0.077916ms)
+✔ unsafe media URLs and declared oversize fail before network (0.293ms)
+✔ retry backoff bounded; terminal disconnects stop; missing presence patch blocks connection (0.20975ms)
+✔ nested view-once envelopes are excluded while nested edited documents normalize (0.079667ms)
+✔ real Baileys HTTP boundary forwards redirect rejection and cancellation (16.164542ms)
+✔ allowlist enforced at ingestion and every retrieval; live config revocation (16.396875ms)
+✔ malformed policy fails closed (6.3345ms)
+✔ duplicates, monotonic edits and tombstones survive replay and reopen (7.317667ms)
+✔ deletion before history prevents resurrection and fills timestamp (5.619083ms)
+✔ cursor paginates timestamp ties, rejects changed filters and malicious payloads (5.803167ms)
+✔ literal search resists SQL and wildcard injection; filters and context boundaries (6.218042ms)
+✔ zero matches carries explicit incomplete coverage (2.381542ms)
+✔ media cannot cross revisions, survive deletion, exceed limits, or expose a path (3.918791ms)
+✔ discovery is human-only; MCP selected list excludes unselected metadata (2.690958ms)
+✔ offline archive never creates credentials (2.014875ms)
+✔ discovered chats accept tombstones and post-clear deletion; old content stays cleared (5.081709ms)
+✔ unknown or unrelated schema is rejected without changes in both modes (6.799958ms)
+✔ changing dataDir fails closed for already-open archive (4.298ms)
+✔ archive account binding is immutable and populated unbound archives cannot be adopted (5.259417ms)
+✔ unbound populated archive requires a fresh directory (5.664875ms)
+(node:56691) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ attachment read waits for worker termination before releasing its result (2.0055ms)
+✔ parser cancellation also waits for worker termination (2.6485ms)
+(node:56692) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ live reader verifies a server round-trip and includes messages received while querying (264.748792ms)
+✔ empty selected chat requests history and then returns actual delivered messages (258.173708ms)
+✔ revocation during server probe blocks both content return and history requests (3.304541ms)
+✔ attachment contents are fetched on demand even when eager media caching is disabled (30.270417ms)
+✔ attachment authorization is checked again after download and parsing (21.965292ms)
+✔ ordinary live updates and cached messages do not establish history delivery (5063.103167ms)
+✔ account access permits any named conversation and enables approved history recovery (5077.903084ms)
+✔ client cancellation aborts attachment transfer and releases the live reader (4.18225ms)
+✔ account recovery handles an anchorless refusal and notices delayed history (3.600666ms)
+✔ selected scope and revoked account scope cannot recover full history after refusal (4.349667ms)
+✔ cancelled anchorless request cannot start recovery (3.112333ms)
+(node:56693) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ recovery requests only contact snapshot, validates MACs, reads keys without resets and fails closed (3.197083ms)
+✔ saved names, alternate names, accents and explicit identities survive reopen without granting chat access (23.554458ms)
+✔ group titles never acquire participant names; conflicting identity mappings are replaced (9.841166ms)
+✔ schema two upgrades preserve message storage and enable durable contacts (4.903084ms)
+✔ snapshot processing extracts contacts only and ignores read/privacy settings (0.153917ms)
+✔ delayed snapshot cannot overwrite a newer contact rename or cleared field (9.101833ms)
+✔ contact recovery status survives restart independently of public coverage (4.205458ms)
+✔ legacy MCP 2024-11-05 retains structured/text parity and exits on EOF (250.137625ms)
+✔ legacy MCP 2025-11-25 retains structured/text parity and exits on EOF (237.60775ms)
+(node:56696) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ actual sync lifecycle persists credentials and tombstones while media is stalled, aborts cleanly (80.384458ms)
+Connection closed (code 401); relink required.
+✔ terminal disconnect remains visible after cleanup (71.001834ms)
+Connection closed (code 408); reconnecting in 1000 ms.
+Sync failed; stopped to avoid silent gaps. Check configuration, account binding, credentials, and archive.
+✔ reconnect factory failure is contained, preserved, and releases writer lock (1071.009625ms)
+Connection closed (code 408); reconnecting in 1000 ms.
+✔ reconnect ignores stale socket events and keeps account binding across device suffixes (1174.04375ms)
+✔ different authenticated account cannot reuse the archive or open a socket (65.910917ms)
+✔ shutdown awaits one async socket end before saving credentials and releasing handles/lock (67.607209ms)
+✔ async shutdown rejection is contained and local lock still releases (63.329792ms)
+✔ link diagnostics retain only stages and numeric disconnect reasons; fresh QR replaces terminal contents (1179.208333ms)
+✔ version lookup failure opens no socket and releases the writer lock (64.684459ms)
+✔ shutdown cancels version lookup without opening a socket or retaining a lock (63.350125ms)
+Connection closed (code 515); reconnecting in 0 ms.
+Connected. Selected chats are being archived. Ctrl-C stops sync.
+✔ pairing restart immediately opens a new socket with saved credentials and a secret-free ordered trace (96.31475ms)
+✔ contact events, history contacts and direct-message push names persist without group name pollution (65.301ms)
+✔ latest conversation pages preserve chronological order, ties and authorization (7.945875ms)
+✔ attachment descriptors cannot survive edits, deletion or selection revocation (3.945583ms)
+✔ private live IPC returns bounded results and explicit errors instead of stale data (8.459917ms)
+✔ image attachment produces actual visual content (34.028459ms)
+✔ spreadsheet returns sheets, rows, cached formula values without evaluation (234.58225ms)
+✔ DOCX extracts text and excludes external relationships (22.69375ms)
+✔ PDF returns extracted page text and a visual page (113.319875ms)
+✔ unsupported and oversized attachments fail explicitly (19.413541ms)
+✔ spreadsheet cell clipping is disclosed and oversized rows remain valid JSON (228.967542ms)
+✔ attachment parser terminates on caller cancellation (2.268375ms)
+✔ closing an IPC client cancels the accepted request (3.490375ms)
+✔ account discovery exposes only chat identifiers the reader can accept (3.139042ms)
+✔ document ZIP rejects undercounts, hidden replacement entries and duplicate paths (38.732208ms)
+✔ document ZIP rejects bad directory bounds, multi-disk, ZIP64 and truncated end records (90.685041ms)
+✔ actual media transfer decrypts synthetic bytes and enforces streaming byte limit (31.244167ms)
+✔ abort after response headers reaches decrypted stream without hanging or unhandled source error (1.107667ms)
+✔ stopping the decrypted stream cancels its upstream response body (2.976584ms)
+✔ modern stdio discovery, private uncached schemas, errors and reads without initialization (267.011708ms)
+✔ discovery followed by legacy initialization creates a usable replacement archive (236.060625ms)
+✔ stdio EOF exits cleanly before a server instance opens (224.742875ms)
+✔ stdio EOF exits cleanly after modern call (237.924084ms)
+✔ stdio SIGINT exits cleanly before a server instance opens (224.601041ms)
+✔ stdio SIGINT exits cleanly after modern call (231.882916ms)
+✔ stdio SIGTERM exits cleanly before a server instance opens (232.17875ms)
+✔ stdio SIGTERM exits cleanly after modern call (231.170625ms)
+✔ QR credentials resume by paired identity without a registration flag; provisional credentials cannot sync (26.1505ms)
+✔ installed pairing handlers persist refreshed secrets before QR display, retain refs and keys, and keep timer cadence (22.18725ms)
+✔ refresh is inert before QR, for malformed nodes, during closed transport and after identity assignment (9.246333ms)
+✔ installed ACK path works before login and retains message sender after login (0.987334ms)
+✔ real SDK client and child stdio server: tools, structured/text parity, errors, dynamic policy (514.655084ms)
+✔ linking refused without explicit flag; offline sync refused without credentials (953.639542ms)
+✔ installed transport boundary suppresses all presence/chatstate/read stanzas but retains sync delivery traffic (3.895333ms)
+✔ Web version uses the official endpoint, bounds the request and forbids redirects (19.251791ms)
+✔ failed, malformed and unsafe version responses never use the bundled fallback (0.850166ms)
+✔ version lookup contains raw network errors and propagates cancellation to fetch (0.24875ms)
+ℹ tests 90
+ℹ suites 0
+ℹ pass 90
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11074.498084

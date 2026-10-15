@@ -8,6 +8,7 @@ export const chatIdSchema = z
 const schema = z
   .object({
     dataDir: z.string().min(1),
+    access: z.enum(["selected", "account"]).default("selected"),
     allowedChats: z.array(chatIdSchema).max(500),
     cacheMedia: z.boolean().default(false),
     maxMediaBytes: z
@@ -41,4 +42,11 @@ export function privateDirectory(path: string): void {
   if (!stat.isDirectory() || stat.isSymbolicLink())
     throw new Error("Data directory must be a real private directory");
   chmodSync(path, 0o700);
+}
+
+export function chatAllowed(config: Config, chatId: string): boolean {
+  return (
+    chatIdSchema.safeParse(chatId).success &&
+    (config.access === "account" || config.allowedChats.includes(chatId))
+  );
 }

@@ -1,0 +1,4 @@
+interface:
+  display_name: "WhatsApp"
+  short_description: "Read chats, attachments, and English or Spanish voice notes"
+  default_prompt: "Use $whatsapp to read the requested conversation, inspect its attachments, or transcribe its voice notes."

@@ -66,7 +66,7 @@ function setup(t) {
   db.exec("CREATE TABLE auth(key TEXT PRIMARY KEY,value TEXT NOT NULL)");
   db.prepare("INSERT INTO auth VALUES(?,?)").run(
     "creds",
-    JSON.stringify({ registered: true, me: { id: "999@s.whatsapp.net" } }),
+    JSON.stringify({ registered: false, me: { id: "999@s.whatsapp.net" } }),
   );
   db.close();
   return { dir, policy: configPolicy(path) };
@@ -368,4 +368,116 @@ test("shutdown cancels version lookup without opening a socket or retaining a lo
   assert.equal(lookupSignal.aborted, true);
   assert.equal(sockets.length, count);
   assert.equal(existsSync(join(dir, "sync.lock")), false);
+});
+
+test("pairing restart immediately opens a new socket with saved credentials and a secret-free ordered trace", async (t) => {
+  const { dir, policy } = setup(t);
+  const tty = Object.getOwnPropertyDescriptor(process.stderr, "isTTY");
+  Object.defineProperty(process.stderr, "isTTY", {
+    value: true,
+    configurable: true,
+  });
+  t.after(() => {
+    if (tty) Object.defineProperty(process.stderr, "isTTY", tty);
+    else delete process.stderr.isTTY;
+  });
+  const running = sync(policy, true);
+  await new Promise((resolve) => setImmediate(resolve));
+  const old = sockets.at(-1);
+  old.options.auth.creds.secret = "SECRET-SENTINEL";
+  old.ev.emit("creds.update", { secret: "SECRET-SENTINEL" });
+  old.ev.emit("connection.update", { isNewLogin: true });
+  old.ev.emit("connection.update", {
+    connection: "close",
+    lastDisconnect: { error: { output: { statusCode: 515 } } },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const current = sockets.at(-1);
+  assert.notEqual(current, old);
+  assert.equal(current.options.auth.creds.secret, "SECRET-SENTINEL");
+  old.ws.emit("CB:failure", { secret: "SECRET-SENTINEL" });
+  current.ev.emit("connection.update", { connection: "open" });
+  process.emit("SIGTERM");
+  await running;
+  const db = new DatabaseSync(join(dir, "archive.sqlite"), { readOnly: true });
+  const trace = JSON.parse(
+    db.prepare("SELECT value FROM status WHERE key='pairingTrace'").get().value,
+  );
+  db.close();
+  assert.equal(JSON.stringify(trace).includes("SECRET"), false);
+  assert.equal(
+    trace.some((entry) => entry.event === "CB:failure"),
+    false,
+  );
+  assert.deepEqual(
+    trace.map((entry) => entry.event),
+    [
+      "session-start",
+      "socket-create",
+      "credentials-saved",
+      "paired",
+      "disconnected",
+      "socket-create",
+      "authenticated-open",
+    ],
+  );
+  assert.equal(
+    trace.find((entry) => entry.event === "disconnected").retryMs,
+    0,
+  );
+  assert.equal(trace.at(-1).socket, 2);
+});
+
+test("contact events, history contacts and direct-message push names persist without group name pollution", async (t) => {
+  const { dir, policy } = setup(t);
+  const running = sync(policy, false);
+  await new Promise((resolve) => setImmediate(resolve));
+  const socket = sockets.at(-1);
+  socket.ev.emit("chats.upsert", [
+    { id: "111@s.whatsapp.net" },
+    { id: "123@g.us", name: "Fixture group" },
+  ]);
+  socket.ev.emit("contacts.upsert", [
+    { id: "111@s.whatsapp.net", name: "Jordan Example" },
+  ]);
+  socket.ev.emit("contacts.update", [
+    { id: "111@s.whatsapp.net", notify: "Jay" },
+  ]);
+  socket.ev.emit("messaging-history.set", {
+    chats: [],
+    messages: [],
+    contacts: [{ id: "111@s.whatsapp.net", username: "jexample" }],
+    lidPnMappings: [{ pn: "111@s.whatsapp.net", lid: "555@lid" }],
+  });
+  const reader = new Archive(join(dir, "archive.sqlite"), policy, true);
+  assert.equal(reader.findChats("Jordan")[0].identityId, "555@lid");
+  assert.equal(reader.findChats("jay").length, 1);
+  assert.equal(reader.findChats("jexample").length, 1);
+  socket.ev.emit("messages.upsert", {
+    messages: [
+      {
+        key: { remoteJid: "111@s.whatsapp.net", fromMe: false, id: "push" },
+        pushName: "Updated nickname",
+        messageTimestamp: 123,
+        message: { conversation: "synthetic" },
+      },
+      {
+        key: {
+          remoteJid: "123@g.us",
+          participant: "111@s.whatsapp.net",
+          fromMe: false,
+          id: "group",
+        },
+        pushName: "Not a group title",
+        messageTimestamp: 124,
+        message: { conversation: "synthetic" },
+      },
+    ],
+    type: "notify",
+  });
+  assert.equal(reader.findChats("Updated nickname").length, 1);
+  assert.deepEqual(reader.findChats("Not a group title"), []);
+  reader.close();
+  process.emit("SIGTERM");
+  await running;
 });

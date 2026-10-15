@@ -10,8 +10,6 @@ All rounds used Henry’s exact personal `strategic-code-design` review rubric a
 
 Round 3 independently reverified its fixes: 11/11 targeted tests passed, with **Approve for the documented offline implementation** and no remaining actionable findings. Earlier Block verdicts describe pre-fix code and are preserved with evidence/fix appendices.
 
-Live linking, actual conversation selection and older-history comparison remain separate approval-dependent validation steps, not completed reviews or claimed test results.
-
 The precommit [source-comment audit](code-comments.md) applies the actual `code-comments` skill found through its symlink. Its comment-only refinements and the explicit current protocol negotiation assertion passed the full 35-test check before publication.
 
 ## SDK v2 migration reviews
@@ -24,4 +22,15 @@ The original reviews above remain the historical evidence for the archive and sy
 
 All three focused rounds approved the migration. Final evidence was regenerated after the last review; the full 44-test check passed again. The changed comments received explicit KEEP AS-IS verdicts in every focused review.
 
-## Linking compatibility follow-up
+## Connected reader and attachments
+
+Four sequential GPT-6.1 Sol review-and-fix rounds, using the exact personal strategic-code-design and code-comments skills:
+
+1. [Round 1](live-round-1.md): history provenance, deadline/cancellation, spreadsheet clipping.
+2. [Round 2](live-round-2.md): refusal fallback, delayed history, available-chat filtering.
+3. [Round 3](live-round-3.md): adversarial ZIP validation and worker termination.
+4. [Round 4](live-round-4.md): approved code; live acceptance tracked separately.
+
+[Final check log](../live-check.log): 82 tests passing after the last fixes.
+
+## Contact-name resolution follow-up
