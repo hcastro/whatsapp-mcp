@@ -1,6 +1,35 @@
 import { readFileSync, writeFileSync } from "node:fs";
 const guards = [
   {
+    file: "Socket/messages-recv.js",
+    original: "// recv a message\n    ws.on('CB:message', async (node) => {",
+    replacement:
+      "// whatsapp-readonly-mcp: acknowledge status transport delivery without reading or archiving it.\n    ws.on('CB:status', (node) => {\n        sendMessageAck(node).catch(error => onUnexpectedError(error, 'acking status stanza'));\n    });\n    // recv a message\n    ws.on('CB:message', async (node) => {",
+  },
+  ...[
+    [
+      'console.warn("Session already closed", session);',
+      'console.warn("Session already closed");',
+    ],
+    [
+      'console.info("Closing session:", session);',
+      'console.info("Closing signal session");',
+    ],
+    [
+      'console.info("Opening session:", session);',
+      'console.info("Opening signal session");',
+    ],
+    [
+      'console.info("Removing old closed session:", oldestSession);',
+      'console.info("Removing old closed signal session");',
+    ],
+  ].map(([original, replacement]) => ({
+    root: "libsignal/src/",
+    file: "session_record.js",
+    original,
+    replacement,
+  })),
+  {
     file: "Socket/chats.js",
     original:
       "sendPresenceUpdate(markOnlineOnConnect ? 'available' : 'unavailable').catch(error => onUnexpectedError(error, 'presence update requests'));",
@@ -72,7 +101,9 @@ const guards = [
 // Only patch the reviewed upstream text; fail on any changed implementation.
 for (const guard of guards) {
   const target = new URL(
-    "../node_modules/@whiskeysockets/baileys/lib/" + guard.file,
+    "../node_modules/" +
+      (guard.root ?? "@whiskeysockets/baileys/lib/") +
+      guard.file,
     import.meta.url,
   );
   const source = readFileSync(target, "utf8");

@@ -32,7 +32,6 @@ export function retryDelay(attempt: number, reason?: number): number | null {
   if (
     [
       DisconnectReason.loggedOut,
-      DisconnectReason.badSession,
       DisconnectReason.connectionReplaced,
       DisconnectReason.multideviceMismatch,
       DisconnectReason.forbidden,
@@ -42,6 +41,31 @@ export function retryDelay(attempt: number, reason?: number): number | null {
   // Pairing requires a new socket immediately, regardless of earlier QR timeouts.
   if (reason === DisconnectReason.restartRequired) return 0;
   return Math.min(60_000, 1000 * 2 ** Math.min(attempt, 6));
+}
+
+export function disconnectDiagnostic(value: unknown) {
+  const error = value as
+    | {
+        output?: { statusCode?: unknown };
+        message?: unknown;
+        data?: { content?: { tag?: unknown; attrs?: { class?: unknown } }[] };
+      }
+    | undefined;
+  const code = error?.output?.statusCode;
+  const streamAck = error?.message === "Stream Errored (ack)";
+  const ack = Array.isArray(error?.data?.content)
+    ? error.data.content.find((node) => node?.tag === "ack")
+    : undefined;
+  const ackClass = ack?.attrs?.class;
+  return {
+    code: typeof code === "number" && Number.isFinite(code) ? code : null,
+    reason: streamAck ? "stream-ack" : "unclassified",
+    ...(streamAck &&
+    typeof ackClass === "string" &&
+    ["status", "message", "receipt", "notification", "call"].includes(ackClass)
+      ? { ackClass }
+      : {}),
+  };
 }
 
 /** Explicit network process; never called or imported by the MCP entry point. */
@@ -485,13 +509,12 @@ export async function sync(policy: Policy, allowLink: boolean): Promise<void> {
           }
           if (event.connection === "close") {
             connected = false;
-            const error = event.lastDisconnect?.error as
-              | { output?: { statusCode?: number } }
-              | undefined;
-            const code = error?.output?.statusCode;
+            const diagnostic = disconnectDiagnostic(
+              event.lastDisconnect?.error,
+            );
+            const code = diagnostic.code ?? undefined;
             store.setStatus("lastDisconnect", {
-              code:
-                typeof code === "number" && Number.isFinite(code) ? code : null,
+              ...diagnostic,
               at: Date.now(),
             });
             if (allowLink)

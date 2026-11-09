@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { normalize } from "../dist/normalize.js";
 import { fetchMedia } from "../dist/media.js";
-import { retryDelay } from "../dist/sync.js";
+import { retryDelay, disconnectDiagnostic } from "../dist/sync.js";
 const raw = (message) => ({
   key: { remoteJid: "111:2@s.whatsapp.net", id: "A", fromMe: false },
   messageTimestamp: 100,
@@ -64,6 +64,8 @@ test("unsafe media URLs and declared oversize fail before network", async () => 
 test("retry backoff bounded; terminal disconnects stop; missing presence patch blocks connection", () => {
   assert.equal(retryDelay(0, 401), null);
   assert.equal(retryDelay(0, 440), null);
+  assert.equal(retryDelay(0, 500), 1000);
+  assert.equal(retryDelay(100, 500), 60000);
   assert.equal(retryDelay(0, 408), 1000);
   assert.equal(retryDelay(100, 408), 60000);
   assert.equal(retryDelay(100, 515), 0);
@@ -77,6 +79,30 @@ test("retry backoff bounded; terminal disconnects stop; missing presence patch b
     /whatsapp-readonly-mcp: suppress automatic presence broadcasts/,
   );
   assert.doesNotMatch(patched, /sendPresenceUpdate\(markOnlineOnConnect \?/);
+});
+
+test("disconnect diagnostics retain an allowlisted ack class without message IDs, payloads or keys", () => {
+  const details = disconnectDiagnostic({
+    output: { statusCode: 500 },
+    message: "Stream Errored (ack)",
+    data: {
+      secret: "synthetic-private-key",
+      content: [{ tag: "ack", attrs: { class: "status", id: "private-id" } }],
+    },
+  });
+  assert.deepEqual(details, {
+    code: 500,
+    reason: "stream-ack",
+    ackClass: "status",
+  });
+  assert.deepEqual(
+    disconnectDiagnostic({ output: { statusCode: 500 }, message: "secret" }),
+    { code: 500, reason: "unclassified" },
+  );
+  assert.deepEqual(disconnectDiagnostic(undefined), {
+    code: null,
+    reason: "unclassified",
+  });
 });
 
 test("nested view-once envelopes are excluded while nested edited documents normalize", () => {

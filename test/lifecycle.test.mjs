@@ -129,6 +129,39 @@ test("terminal disconnect remains visible after cleanup", async (t) => {
   reader.close();
   assert.equal(existsSync(join(dir, "sync.lock")), false);
 });
+
+test("500 stream-ack disconnect reconnects with the saved session and accepts later messages", async (t) => {
+  const { dir, policy } = setup(t);
+  const running = sync(policy, false);
+  await new Promise((resolve) => setImmediate(resolve));
+  const old = sockets.at(-1);
+  old.ev.emit("connection.update", {
+    connection: "close",
+    lastDisconnect: {
+      error: {
+        output: { statusCode: 500 },
+        message: "Stream Errored (ack)",
+        data: {
+          content: [{ tag: "ack", attrs: { class: "status", id: "private" } }],
+        },
+      },
+    },
+  });
+  const reader = new Archive(join(dir, "archive.sqlite"), policy, true);
+  assert.equal(reader.coverage().sync.connection.state, "reconnecting");
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  const current = sockets.at(-1);
+  assert.notEqual(current, old);
+  current.ev.emit("messages.upsert", {
+    messages: [{ ...message, message: { conversation: "after reconnect" } }],
+    type: "notify",
+  });
+  assert.equal(reader.search({}).messages[0].text, "after reconnect");
+  process.emit("SIGTERM");
+  await running;
+  reader.close();
+  assert.equal(existsSync(join(dir, "auth.sqlite")), true);
+});
 test("reconnect factory failure is contained, preserved, and releases writer lock", async (t) => {
   const { dir, policy } = setup(t);
   const running = sync(policy, false);

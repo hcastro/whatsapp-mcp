@@ -3,6 +3,58 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { EventEmitter } from "node:events";
+import SessionRecord from "libsignal/src/session_record.js";
+
+test("top-level status delivery is acknowledged without entering message handling", async () => {
+  const source = readFileSync(
+    "node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js",
+    "utf8",
+  );
+  const start = source.indexOf("ws.on('CB:status'");
+  const end = source.indexOf("\n    });", start) + 8;
+  assert.ok(start >= 0 && end > start);
+  const ws = new EventEmitter();
+  const delivered = [];
+  runInNewContext(source.slice(start, end), {
+    ws,
+    sendMessageAck: async (node) => {
+      delivered.push(node);
+    },
+    onUnexpectedError: (error) => {
+      throw error;
+    },
+  });
+  const node = { tag: "status", attrs: { id: "synthetic", type: "media" } };
+  ws.emit("CB:status", node);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(delivered, [node]);
+});
+
+test("signal session transitions never log session keys", () => {
+  const record = new SessionRecord();
+  const session = {
+    indexInfo: { closed: -1 },
+    privateKey: "synthetic-private-key",
+  };
+  const messages = [];
+  const originalInfo = console.info;
+  const originalWarn = console.warn;
+  console.info = (...args) => messages.push(args);
+  console.warn = (...args) => messages.push(args);
+  try {
+    record.closeSession(session);
+    record.closeSession(session);
+    record.openSession(session);
+  } finally {
+    console.info = originalInfo;
+    console.warn = originalWarn;
+  }
+  assert.equal(messages.length, 3);
+  assert.ok(
+    messages.every((args) => args.length === 1 && typeof args[0] === "string"),
+  );
+  assert.doesNotMatch(JSON.stringify(messages), /synthetic-private-key/);
+});
 
 test("installed transport boundary suppresses all presence/chatstate/read stanzas but retains sync delivery traffic", async () => {
   const source = readFileSync(
