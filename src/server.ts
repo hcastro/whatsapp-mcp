@@ -8,8 +8,10 @@ const coverageSchema = z.object({
   complete: z.literal(false),
   notice: z.string(),
   storedMessages: z.number(),
+  readableMessages: z.number(),
   oldestTimestamp: z.number().nullable(),
   newestTimestamp: z.number().nullable(),
+  newestReadableTimestamp: z.number().nullable(),
   sync: z.record(z.string(), z.unknown()),
 });
 const messageSchema = z.object({
@@ -27,6 +29,15 @@ const messageSchema = z.object({
   fileName: z.string().nullable().optional(),
 });
 const id = z.string().regex(/^[a-f0-9]{64}$/);
+const conversationSchema = z.object({
+  messages: z.array(messageSchema),
+  nextCursor: z.string().nullable(),
+  hasMoreLocal: z.boolean(),
+  coverage: coverageSchema,
+  freshness: z.object({ connected: z.literal(true), checkedAt: z.number() }),
+  history: z.record(z.string(), z.unknown()),
+  notice: z.string(),
+});
 
 export function createServer(
   archive: Archive,
@@ -76,27 +87,37 @@ export function createServer(
     "read_conversation",
     {
       description:
-        "Read the latest messages in an authorized conversation through the connected WhatsApp service. Verifies a server round-trip; fails when disconnected. Returns chronological messages, a cursor for older pages, explicit history-request status and coverage. Empty results never prove the conversation is empty.",
+        "Read an authorized conversation with a verified server round-trip. Start without a cursor for the latest stored page, then pass nextCursor unchanged for older pages. Pages display chronologically. hasMoreLocal describes only stored older messages. An empty page preserves its input cursor for retry after delayed recovery. requestHistory recovers older history at a short page; use recover_history for recent gaps or explicit recovery. A live ping never establishes complete history.",
       inputSchema: z.object({
         chatId: chatIdSchema,
         limit: z.number().int().min(1).max(100).default(50),
-        cursor: z.string().max(1024).optional(),
+        cursor: z.string().min(1).max(1024).optional(),
         requestHistory: z.boolean().default(true),
       }),
-      outputSchema: z.object({
-        messages: z.array(messageSchema),
-        nextCursor: z.string().nullable(),
-        coverage: coverageSchema,
-        freshness: z.object({
-          connected: z.literal(true),
-          checkedAt: z.number(),
-        }),
-        history: z.record(z.string(), z.unknown()),
-        notice: z.string(),
-      }),
+      outputSchema: conversationSchema,
       annotations: { ...annotations, openWorldHint: true },
     },
     (input) => run(() => connected({ operation: "read", ...input })),
+  );
+  server.registerTool(
+    "recover_history",
+    {
+      description:
+        "Explicitly request missing WhatsApp history for a user-directed chat. direction recent requests a current catch-up even when cached pages are full, without a cursor. direction older uses the supplied conversation cursor or the oldest stored message. Recovery is bounded and throttled; account mode may request wider account history after an anchorless request stalls, while selected mode never does. Returns received messages, added-message/page-change indicators and a history status, never a completeness guarantee. Retry an older cursor to read late delivery; restart from the latest page after recent recovery.",
+      inputSchema: z
+        .object({
+          chatId: chatIdSchema,
+          direction: z.enum(["older", "recent"]),
+          limit: z.number().int().min(1).max(100).default(100),
+          cursor: z.string().min(1).max(1024).optional(),
+        })
+        .refine((input) => input.direction === "older" || !input.cursor, {
+          message: "Recent recovery does not accept an older-page cursor",
+        }),
+      outputSchema: conversationSchema,
+      annotations: { ...annotations, openWorldHint: true },
+    },
+    (input) => run(() => connected({ operation: "history", ...input })),
   );
   server.registerTool(
     "read_attachment",
@@ -191,7 +212,7 @@ export function createServer(
         query: z.string().max(500).default(""),
         chatId: chatIdSchema.optional(),
         limit: z.number().int().min(1).max(100).default(30),
-        cursor: z.string().max(1024).optional(),
+        cursor: z.string().min(1).max(1024).optional(),
         after: z.number().int().nonnegative().optional(),
         before: z.number().int().nonnegative().optional(),
       }),

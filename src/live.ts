@@ -10,10 +10,22 @@ export const liveRequestSchema = z.discriminatedUnion("operation", [
       operation: z.literal("read"),
       chatId: chatIdSchema,
       limit: z.number().int().min(1).max(100).default(50),
-      cursor: z.string().max(1024).optional(),
+      cursor: z.string().min(1).max(1024).optional(),
       requestHistory: z.boolean().default(true),
     })
     .strict(),
+  z
+    .object({
+      operation: z.literal("history"),
+      chatId: chatIdSchema,
+      direction: z.enum(["older", "recent"]),
+      limit: z.number().int().min(1).max(100).default(100),
+      cursor: z.string().min(1).max(1024).optional(),
+    })
+    .strict()
+    .refine((request) => request.direction === "older" || !request.cursor, {
+      message: "Recent recovery does not accept an older-page cursor",
+    }),
   z
     .object({
       operation: z.literal("attachment"),
@@ -26,6 +38,20 @@ export const liveRequestSchema = z.discriminatedUnion("operation", [
 ]);
 export type LiveRequest = z.infer<typeof liveRequestSchema>;
 export class LiveError extends Error {}
+export function cancellable<T>(
+  work: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () =>
+      reject(new LiveError("Live request cancelled or exceeded its deadline."));
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    void work
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", abort));
+  });
+}
 export const LIVE_OPERATION_TIMEOUT_MS = 60_000;
 export const LIVE_RESPONSE_TIMEOUT_MS = LIVE_OPERATION_TIMEOUT_MS + 5000;
 export interface LiveContext {

@@ -481,3 +481,20 @@ test("contact events, history contacts and direct-message push names persist wit
   process.emit("SIGTERM");
   await running;
 });
+
+test("saved-session restart preserves the existing Web companion login profile", async (t) => {
+  const { policy } = setup(t);
+  const running = sync(policy, false);
+  await new Promise((resolve) => setImmediate(resolve));
+  const socket = sockets.at(-1);
+  process.emit("SIGTERM");
+  await running;
+  const payload = baileys.generateLoginNode("999:1@s.whatsapp.net", {
+    ...baileys.DEFAULT_CONNECTION_CONFIG,
+    ...socket.options,
+  });
+  assert.equal(
+    payload.webInfo.webSubPlatform,
+    baileys.proto.ClientPayload.WebInfo.WebSubPlatform.WEB_BROWSER,
+  );
+});

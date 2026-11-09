@@ -48,6 +48,26 @@ function message(row: Row): Message {
   };
 }
 
+function conversationCursor(cursor: string, chatId: string) {
+  try {
+    if (cursor.length > 1024 || !/^[A-Za-z0-9_-]+$/.test(cursor))
+      throw new Error();
+    const value = JSON.parse(Buffer.from(cursor, "base64url").toString());
+    if (
+      !value ||
+      value.chatId !== chatId ||
+      !Number.isSafeInteger(value.timestamp) ||
+      value.timestamp < 0 ||
+      typeof value.id !== "string" ||
+      !/^[a-f0-9]{64}$/.test(value.id)
+    )
+      throw new Error();
+    return value as { chatId: string; timestamp: number; id: string };
+  } catch {
+    throw new Error("Invalid conversation cursor");
+  }
+}
+
 /** Every query rechecks selected chats; replayed history cannot restore revoked content. */
 export class Archive {
   private db: DatabaseSync;
@@ -153,7 +173,7 @@ export class Archive {
       throw new Error("Chat unavailable or not selected");
   }
   private scope(chatId?: string): { sql: string; values: SQLInputValue[] } {
-    const ids = [...new Set(this.policy().allowedChats)];
+    const ids = [...new Set(this.policy().allowedChats)].sort();
     if (chatId) {
       this.allowed(chatId);
       return { sql: "chatId=?", values: [chatId] };
@@ -314,12 +334,18 @@ export class Archive {
     const scope = this.scope(chatId);
     const stats = this.db
       .prepare(
-        `SELECT COUNT(*) AS storedMessages,MIN(NULLIF(timestamp,0)) AS oldestTimestamp,MAX(timestamp) AS newestTimestamp FROM messages WHERE ${scope.sql}`,
+        `SELECT COUNT(*) AS storedMessages,COUNT(CASE WHEN deleted=0 THEN 1 END) AS readableMessages,MIN(NULLIF(timestamp,0)) AS oldestTimestamp,MAX(timestamp) AS newestTimestamp,MAX(CASE WHEN deleted=0 THEN NULLIF(timestamp,0) END) AS newestReadableTimestamp FROM messages WHERE ${scope.sql}`,
       )
-      .get(...scope.values);
+      .get(...scope.values) as {
+      storedMessages: number;
+      readableMessages: number;
+      oldestTimestamp: number | null;
+      newestTimestamp: number | null;
+      newestReadableTimestamp: number | null;
+    };
     const sync = this.db
       .prepare(
-        "SELECT key,value FROM status WHERE key IN ('connection','heartbeat','history')",
+        "SELECT key,value FROM status WHERE key IN ('connection','heartbeat','history','lastDisconnect','historyRequestResponse')",
       )
       .all();
     return {
@@ -356,15 +382,20 @@ export class Archive {
       input.after ?? 0,
       input.before ?? Number.MAX_SAFE_INTEGER,
     ];
-    if (input.cursor) {
+    if (input.cursor !== undefined) {
       try {
-        if (input.cursor.length > 1024) throw new Error();
+        if (
+          input.cursor.length > 1024 ||
+          !/^[A-Za-z0-9_-]+$/.test(input.cursor)
+        )
+          throw new Error();
         const cursor = JSON.parse(
           Buffer.from(input.cursor, "base64url").toString(),
         ) as { fingerprint: string; timestamp: number; id: string };
         if (
           cursor.fingerprint !== fingerprint ||
           !Number.isSafeInteger(cursor.timestamp) ||
+          cursor.timestamp < 0 ||
           !/^[a-f0-9]{64}$/.test(cursor.id)
         )
           throw new Error();
@@ -447,23 +478,34 @@ export class Archive {
       .get(`history-generation:${chatId}`) as { value: string } | undefined;
     return row ? Number(JSON.parse(row.value)) : 0;
   }
+  historyAnchor(chatId: string, cursor?: string): Message | undefined {
+    this.allowed(chatId);
+    if (cursor === undefined)
+      return this.search({ chatId, limit: 1 }).messages[0];
+    const value = conversationCursor(cursor, chatId);
+    const row = this.db
+      .prepare(
+        `SELECT ${columns} FROM messages WHERE chatId=? AND id=? AND timestamp=? AND deleted=0`,
+      )
+      .get(chatId, value.id, value.timestamp) as Row | undefined;
+    if (!row) throw new Error("Conversation history anchor unavailable");
+    return message(row);
+  }
+  fullHistoryRequestAt(): number {
+    const row = this.db
+      .prepare("SELECT value FROM status WHERE key='fullHistoryRequestAt'")
+      .get() as { value: string } | undefined;
+    const value: unknown = row ? JSON.parse(row.value) : 0;
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
+      throw new Error("Invalid history recovery status");
+    return value;
+  }
   recent(chatId: string, limit = 50, cursor?: string) {
     this.allowed(chatId);
     let tail = "";
     const values: SQLInputValue[] = [chatId];
-    if (cursor) {
-      const value = JSON.parse(Buffer.from(cursor, "base64url").toString()) as {
-        chatId: string;
-        timestamp: number;
-        id: string;
-      };
-      if (
-        cursor.length > 1024 ||
-        value.chatId !== chatId ||
-        !Number.isSafeInteger(value.timestamp) ||
-        !/^[a-f0-9]{64}$/.test(value.id)
-      )
-        throw new Error("Invalid conversation cursor");
+    if (cursor !== undefined) {
+      const value = conversationCursor(cursor, chatId);
       tail = "AND (timestamp<? OR (timestamp=? AND id<?))";
       values.push(value.timestamp, value.timestamp, value.id);
     }
@@ -477,6 +519,7 @@ export class Archive {
     const oldest = page.at(-1);
     return {
       messages: page.reverse().map(message),
+      hasMoreLocal: rows.length > count,
       nextCursor: oldest
         ? Buffer.from(
             JSON.stringify({
@@ -485,7 +528,7 @@ export class Archive {
               id: oldest.id,
             }),
           ).toString("base64url")
-        : null,
+        : (cursor ?? null),
       coverage: this.coverage(chatId),
     };
   }

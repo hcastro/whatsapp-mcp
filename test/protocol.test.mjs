@@ -57,6 +57,7 @@ test("real SDK client and child stdio server: tools, structured/text parity, err
     "list_selected_chats",
     "read_attachment",
     "read_conversation",
+    "recover_history",
     "search_messages",
     "sync_coverage",
   ]);

@@ -328,3 +328,62 @@ test("document ZIP rejects bad directory bounds, multi-disk, ZIP64 and truncated
     /ZIP/,
   );
 });
+
+test("empty conversation pages preserve the boundary for delayed backfill", (t) => {
+  const { archive } = fixture(t);
+  archive.ingest(message(5));
+  const first = archive.recent("111@s.whatsapp.net", 2);
+  assert.equal(first.hasMoreLocal, false);
+  const empty = archive.recent("111@s.whatsapp.net", 2, first.nextCursor);
+  assert.equal(empty.messages.length, 0);
+  assert.equal(empty.nextCursor, first.nextCursor);
+  archive.ingest(message(4));
+  const recovered = archive.recent("111@s.whatsapp.net", 2, empty.nextCursor);
+  assert.deepEqual(
+    recovered.messages.map((m) => m.sourceId),
+    ["4"],
+  );
+});
+
+test("conversation pagination traverses ties and deletions exactly once", (t) => {
+  const { archive } = fixture(t);
+  const expected = [];
+  for (let i = 0; i < 103; i++) {
+    const m = { ...message(i), timestamp: 100 + Math.floor(i / 7) };
+    archive.ingest(m);
+    if (i % 11 === 0) archive.deleteMessage(m.chatId, m.sourceId, false);
+    else expected.push(m.id);
+  }
+  let cursor;
+  const seen = [];
+  for (let i = 0; i < 30; i++) {
+    const page = archive.recent("111@s.whatsapp.net", 6, cursor);
+    assert.equal(
+      new Set(page.messages.map((m) => m.id)).size,
+      page.messages.length,
+    );
+    seen.push(...page.messages.map((m) => m.id));
+    cursor = page.nextCursor;
+    if (!page.hasMoreLocal) break;
+  }
+  assert.equal(new Set(seen).size, seen.length);
+  assert.deepEqual([...seen].sort(), expected.sort());
+});
+
+test("malformed conversation cursors fail consistently before use", (t) => {
+  const { archive } = fixture(t);
+  const encode = (v) => Buffer.from(JSON.stringify(v)).toString("base64url");
+  for (const cursor of [
+    "",
+    "!",
+    "x".repeat(1025),
+    encode(null),
+    encode([]),
+    encode({ chatId: "111@s.whatsapp.net", timestamp: -1, id: "a".repeat(64) }),
+  ]) {
+    assert.throws(
+      () => archive.recent("111@s.whatsapp.net", 2, cursor),
+      /Invalid conversation cursor/,
+    );
+  }
+});

@@ -241,3 +241,29 @@ test("unbound populated archive requires a fresh directory", (t) => {
     /Populated archive/,
   );
 });
+
+test("search cursors tolerate selection reordering but reject empty and negative cursors", (t) => {
+  const { archive, config, save } = fixture(t);
+  config.allowedChats = [A, B];
+  save();
+  for (let i = 1; i < 6; i++) archive.ingest(record(i));
+  const first = archive.search({ limit: 2 });
+  config.allowedChats = [B, A];
+  save();
+  const next = archive.search({ limit: 2, cursor: first.nextCursor });
+  assert.equal(next.messages.length, 2);
+  assert.equal(
+    new Set([...first.messages, ...next.messages].map((m) => m.id)).size,
+    4,
+  );
+  assert.throws(() => archive.search({ cursor: "" }), /Invalid cursor/);
+  const bad = JSON.parse(Buffer.from(first.nextCursor, "base64url").toString());
+  bad.timestamp = -1;
+  assert.throws(
+    () =>
+      archive.search({
+        cursor: Buffer.from(JSON.stringify(bad)).toString("base64url"),
+      }),
+    /Invalid cursor/,
+  );
+});

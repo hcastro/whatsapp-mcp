@@ -321,3 +321,312 @@ test("cancelled anchorless request cannot start recovery", async (t) => {
   await assert.rejects(reader(request, { signal: controller.signal }));
   assert.equal(fullRequests, 0);
 });
+
+test("explicit recent recovery runs on a full cached page and can recover newer messages", async (t) => {
+  const { archive, item, reader, socket, config, path } = setup(t);
+  config.access = "account";
+  writeFileSync(path, JSON.stringify(config));
+  archive.ingest(item);
+  let scoped = 0;
+  let full = 0;
+  socket.fetchMessageHistory = async (_count, key, timestamp) => {
+    scoped++;
+    assert.deepEqual(key, { remoteJid: item.chatId });
+    assert.ok(timestamp > item.timestamp * 1000);
+    throw new Error("phone refused anchorless request");
+  };
+  socket.sendPeerDataOperationMessage = async () => {
+    full++;
+    archive.ingest({
+      ...item,
+      id: messageId(item.chatId, "new", false),
+      sourceId: "new",
+      timestamp: 200,
+      text: "recovered newer message",
+    });
+    archive.recordHistory([item.chatId]);
+  };
+  const result = await reader({
+    operation: "history",
+    chatId: item.chatId,
+    direction: "recent",
+    limit: 1,
+  });
+  assert.equal(scoped, 1);
+  assert.equal(full, 1);
+  assert.equal(result.messages[0].text, "recovered newer message");
+  assert.equal(result.history.direction, "recent");
+  assert.equal(result.history.requestedLimit, 1);
+  assert.equal(result.history.state, "history-observed");
+  assert.equal(result.history.addedMessages, 1);
+  assert.equal(result.history.pageChanged, true);
+  assert.equal(result.coverage.complete, false);
+});
+
+test("older recovery uses the supplied page boundary instead of the archive oldest", async (t) => {
+  const { archive, item, reader, socket } = setup(t);
+  archive.ingest(item);
+  const newer = {
+    ...item,
+    id: messageId(item.chatId, "newer", false),
+    sourceId: "newer",
+    timestamp: 200,
+  };
+  archive.ingest(newer);
+  const page = archive.recent(item.chatId, 1);
+  socket.fetchMessageHistory = async (_count, key, timestamp) => {
+    assert.equal(key.id, newer.sourceId);
+    assert.equal(timestamp, 200000);
+    archive.recordHistory([item.chatId]);
+  };
+  const result = await reader({
+    operation: "history",
+    chatId: item.chatId,
+    direction: "older",
+    cursor: page.nextCursor,
+    limit: 10,
+  });
+  assert.equal(result.messages[0].id, item.id);
+  assert.equal(result.history.state, "history-observed");
+  assert.equal(result.history.addedMessages, 0);
+  assert.equal(result.history.pageChanged, false);
+});
+
+test("selected-chat recent recovery never falls back to full-account history", async (t) => {
+  const { reader, socket, item, archive } = setup(t);
+  archive.ingest(item);
+  socket.fetchMessageHistory = async () => {
+    throw new Error("phone refusal");
+  };
+  let full = 0;
+  socket.sendPeerDataOperationMessage = async () => {
+    full++;
+  };
+  await assert.rejects(
+    reader({
+      operation: "history",
+      chatId: item.chatId,
+      direction: "recent",
+      limit: 10,
+    }),
+  );
+  assert.equal(full, 0);
+});
+
+test("concurrent identical recovery requests issue only one phone request", async (t) => {
+  const { reader, socket, item, archive } = setup(t);
+  archive.ingest(item);
+  let release;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+  let calls = 0;
+  socket.fetchMessageHistory = async () => {
+    calls++;
+    await pending;
+    archive.recordHistory([item.chatId]);
+  };
+  const args = {
+    operation: "history",
+    chatId: item.chatId,
+    direction: "older",
+    limit: 10,
+  };
+  const first = reader(args);
+  await new Promise((resolve) => setImmediate(resolve));
+  const second = await reader(args);
+  assert.equal(second.history.state, "requested");
+  release();
+  const result = await first;
+  assert.equal(calls, 1);
+  assert.equal(result.history.state, "history-observed");
+});
+
+test("full-account recovery cooldown survives reader recreation", async (t) => {
+  const { archive, item, reader, socket, config, path } = setup(t);
+  config.access = "account";
+  writeFileSync(path, JSON.stringify(config));
+  archive.ingest(item);
+  socket.fetchMessageHistory = async () => {
+    throw new Error("phone refusal");
+  };
+  let calls = 0;
+  socket.sendPeerDataOperationMessage = async () => {
+    calls++;
+  };
+  const args = {
+    operation: "history",
+    chatId: item.chatId,
+    direction: "recent",
+    limit: 10,
+  };
+  assert.equal((await reader(args)).history.state, "full-history-requested");
+  const restarted = connectedReader(
+    archive,
+    () => socket,
+    new AbortController().signal,
+  );
+  const result = await restarted(args);
+  assert.equal(result.history.state, "full-history-throttled");
+  assert.ok(result.history.accountRetryAfterMs > 14 * 60 * 1000);
+  assert.equal(calls, 1);
+});
+
+test("different older page boundaries are not blocked by a chat-wide cooldown", async (t) => {
+  const { archive, item, reader, socket } = setup(t);
+  const later = {
+    ...item,
+    id: messageId(item.chatId, "later", false),
+    sourceId: "later",
+    timestamp: 200,
+  };
+  archive.ingest(item);
+  archive.ingest(later);
+  const a = archive.recent(item.chatId, 1);
+  const b = archive.recent(item.chatId, 1, a.nextCursor);
+  const anchors = [];
+  socket.fetchMessageHistory = async (_count, key) => {
+    anchors.push(key.id);
+    archive.recordHistory([item.chatId]);
+  };
+  for (const cursor of [a.nextCursor, b.nextCursor]) {
+    await reader({
+      operation: "history",
+      chatId: item.chatId,
+      direction: "older",
+      cursor,
+      limit: 10,
+    });
+  }
+  assert.deepEqual(anchors, [later.sourceId, item.sourceId]);
+});
+
+test("invented or deleted recovery anchors never reach the phone", async (t) => {
+  const { archive, item, reader, socket } = setup(t);
+  archive.ingest(item);
+  const page = archive.recent(item.chatId, 1);
+  let calls = 0;
+  socket.fetchMessageHistory = async () => {
+    calls++;
+  };
+  const cursor = Buffer.from(
+    JSON.stringify({ chatId: item.chatId, timestamp: 100, id: "a".repeat(64) }),
+  ).toString("base64url");
+  const args = {
+    operation: "history",
+    chatId: item.chatId,
+    direction: "older",
+    limit: 10,
+  };
+  await assert.rejects(reader({ ...args, cursor }), /anchor unavailable/);
+  archive.deleteMessage(item.chatId, item.sourceId, false);
+  await assert.rejects(
+    reader({ ...args, cursor: page.nextCursor }),
+    /anchor unavailable/,
+  );
+  assert.equal(calls, 0);
+});
+
+test("cancellation and revocation during recent recovery prevent account fallback", async (t) => {
+  const { archive, item, reader, socket, config, path } = setup(t);
+  config.access = "account";
+  writeFileSync(path, JSON.stringify(config));
+  archive.ingest(item);
+  let full = 0;
+  socket.sendPeerDataOperationMessage = async () => {
+    full++;
+  };
+  const args = {
+    operation: "history",
+    chatId: item.chatId,
+    direction: "recent",
+    limit: 10,
+  };
+  const controller = new AbortController();
+  socket.fetchMessageHistory = async () => {
+    controller.abort();
+    throw new Error("cancelled");
+  };
+  await assert.rejects(reader(args, { signal: controller.signal }));
+  socket.fetchMessageHistory = async () => {
+    config.access = "selected";
+    config.allowedChats = [];
+    writeFileSync(path, JSON.stringify(config));
+    throw new Error("revoked");
+  };
+  await assert.rejects(reader(args), /not selected/);
+  assert.equal(full, 0);
+});
+
+test("an unrelated older batch cannot suppress a stalled recent catch-up", async (t) => {
+  const { archive, item, reader, socket, config, path } = setup(t);
+  config.access = "account";
+  writeFileSync(path, JSON.stringify(config));
+  archive.ingest(item);
+  socket.fetchMessageHistory = async () => {
+    archive.recordHistory([item.chatId]);
+  };
+  let full = 0;
+  socket.sendPeerDataOperationMessage = async () => {
+    full++;
+  };
+  const result = await reader({
+    operation: "history",
+    chatId: item.chatId,
+    direction: "recent",
+    limit: 10,
+  });
+  assert.equal(full, 1);
+  assert.equal(result.history.state, "full-history-requested");
+  assert.equal(result.history.historyObserved, false);
+  assert.equal(result.history.addedMessages, 0);
+  assert.equal(result.history.pageChanged, false);
+});
+
+test("a socket replacement during recovery invalidates its result", async (t) => {
+  const { archive, item, socket } = setup(t);
+  archive.ingest(item);
+  let current = socket;
+  const reader = connectedReader(
+    archive,
+    () => current,
+    new AbortController().signal,
+  );
+  let full = 0;
+  socket.sendPeerDataOperationMessage = async () => {
+    full++;
+  };
+  socket.fetchMessageHistory = async () => {
+    current = { ...socket };
+    archive.recordHistory([item.chatId]);
+  };
+  await assert.rejects(
+    reader({
+      operation: "history",
+      chatId: item.chatId,
+      direction: "recent",
+      limit: 10,
+    }),
+    /Connection changed/,
+  );
+  assert.equal(full, 0);
+});
+
+test("deletion tombstones are not reported as newly recovered readable messages", async (t) => {
+  const { archive, item, reader, socket } = setup(t);
+  archive.ingest(item);
+  socket.fetchMessageHistory = async () => {
+    archive.deleteMessage(item.chatId, "unseen-deleted", false);
+    archive.recordHistory([item.chatId]);
+  };
+  const result = await reader({
+    operation: "history",
+    chatId: item.chatId,
+    direction: "older",
+    limit: 10,
+  });
+  assert.equal(result.history.addedMessages, 0);
+  assert.equal(result.coverage.storedMessages, 2);
+  assert.equal(result.coverage.readableMessages, 1);
+  assert.equal(result.coverage.newestReadableTimestamp, item.timestamp);
+});
