@@ -2,11 +2,29 @@
 
 A successful live read must verify the current authenticated WhatsApp connection, recheck chat authorization, and return all locally received updates for the requested page. It must disclose historical gaps. The linked-device protocol does not offer a guaranteed arbitrary query of the phone's entire message database.
 
+![Processes and data flow](images/architecture.svg)
+
+For setup and process management, use [operations](OPERATIONS.md). For tool calls and pagination, use [usage](USAGE.md).
+
+## Technology
+
+| Layer | Implementation | Reason |
+| --- | --- | --- |
+| Runtime | Node.js 24+, ESM TypeScript, strict compiler settings | Native SQLite, worker threads and stream cancellation |
+| WhatsApp | Baileys 7.0.0-rc14, guarded patches in `scripts/patch-baileys.mjs` | Linked-device events, media and history requests with reviewed transport behavior |
+| MCP | Official split server/client SDK 2.3.0, Zod schemas | Modern stdio discovery and tested legacy compatibility |
+| Storage | Node `node:sqlite`, account-bound archive schema 3, separate auth database | Durable received history and explicit account ownership |
+| Local transport | Private Unix socket, validated JSON requests | Keep socket lifecycle and live operations in one writer |
+| Document parsing | PDF.js and native canvas, ExcelJS, JSZip, SAX XML parser, image-size | Bounded PDF/image previews and extracted document content |
+| Optional speech | Local MLX Whisper large-v3, Python and FFmpeg | Offline voice transcription on Apple Silicon |
+
+Exact dependency versions and integrity hashes live in [package.json](../package.json) and [package-lock.json](../package-lock.json). The native runtime and canvas installation have been validated on macOS. Other platforms are not covered by the recorded live acceptance.
+
 ## Design alternatives
 
 A single socket-owning MCP would simplify startup but mix credentials, reconnect lifecycle and arbitrary dependency capabilities into the model-facing process. An isolated offline MCP provided strong separation but could not request missing data and failed the intended user experience.
 
-The chosen design retains one socket-owning sync service and adds private local IPC with three validated operations: conversation read, explicit directional history recovery and attachment read. `connected.ts` owns freshness, on-demand retrieval and revalidation. `live.ts` owns framing, bounds, errors and socket lifecycle. MCP translates those operations and does not receive credentials or raw download descriptors. SQLite is the durable query index, not a claim of complete account history.
+The chosen design retains one socket-owning sync service and adds private local IPC with three validated operations: conversation read, explicit directional history recovery and attachment read. `connected.ts` owns freshness, on-demand retrieval and revalidation. `live.ts` owns framing, bounds, errors and socket lifecycle. MCP tools never return credentials or raw download descriptors. SQLite indexes received history, whose completeness remains unknown.
 
 ## Invariants
 
@@ -22,7 +40,16 @@ The chosen design retains one socket-owning sync service and adds private local 
 
 ## Ownership and verification
 
-`sync.ts` owns the linked session and event ingestion. `connected.ts` coordinates authorized live operations. `live.ts` owns local IPC. `archive.ts` owns persistence/authorization. `attachments.ts` isolates parsing and its deadline; `attachment-worker.ts` owns supported formats and expansion limits. `server.ts` owns MCP schemas. Configuration selection remains deliberate user configuration.
+| Module in `src/` | Responsibility |
+| --- | --- |
+| `cli.ts`, `config.ts` | CLI startup, validated configuration and access policy |
+| `sync.ts`, `auth.ts`, `wa-version.ts` | Single linked session, credentials, Web-version resolution and reconnect lifecycle |
+| `normalize.ts`, `contacts.ts`, `contact-recovery.ts` | Message normalization, contact metadata and bounded contact recovery |
+| `archive.ts` | Persistence, account binding, authorization, revisions, coverage and cursors |
+| `history.ts`, `connected.ts` | Recovery coordination, live freshness and asynchronous revalidation |
+| `live.ts` | Local IPC framing, bounds, cancellation and socket lifecycle |
+| `media.ts`, `attachments.ts`, `attachment-worker.ts` | Bounded download/decryption and isolated content parsing |
+| `server.ts` | MCP schemas and structured/text/image results |
 
 The strategic-code-design and code-comments skills guide implementation and review. Review requests use the exact personal review rubric. Tests verify changed contracts, including revocation during asynchronous reads, stale-socket rejection, newest-first pagination with chronological presentation, actual document/image parsers, and real MCP stdio clients. Live acceptance remains separately documented; synthetic success is not proof of recovered phone history.
 
@@ -32,4 +59,4 @@ Archive pagination and upstream recovery have different contracts. A conversatio
 
 `history.ts` owns bounded recovery state, per-boundary cooldowns, duplicate-request suppression and progress observation. `connected.ts` verifies socket liveness and authorization around that asynchronous work. A recent request omits an anchor and targets the current time. Older recovery resolves the cursor to a real authorized nondeleted message, rather than always asking before the archive's oldest row. Account-wide fallback requires the existing account-mode policy at the moment of dispatch. A delivered batch with no page change is distinct from recovered recent data.
 
-Protocol failures, cancelled requests and connection replacements invalidate the operation. Status exposes only bounded metadata. Credentials and download descriptors never leave the sync process. Tests use temporary synthetic archives. Live acceptance records counts and timestamps separately from private message bodies.
+Protocol failures, cancelled requests and connection replacements invalidate the operation. Status exposes only bounded metadata. Credentials and download descriptors are excluded from tool results. Tests use temporary synthetic archives. Live acceptance records counts and timestamps separately from private message bodies.

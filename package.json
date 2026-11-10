@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Local selected-chat WhatsApp archive and read-only stdio MCP",
+  "description": "Local read-only WhatsApp MCP with live reads, history recovery and attachment parsing",
   "engines": {
     "node": ">=24.0.0"
   },

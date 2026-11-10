@@ -1,5 +1,6 @@
 {
   "dataDir": ".local",
+  "access": "selected",
   "allowedChats": [],
   "cacheMedia": false,
   "maxMediaBytes": 4194304

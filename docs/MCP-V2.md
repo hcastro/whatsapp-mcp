@@ -1,5 +1,7 @@
 # MCP v2 migration
 
+This is the October 4, 2026 migration record. Tool counts and package observations below describe that revision. The current nine-tool contract is in [usage](USAGE.md), with current dependencies pinned in [package.json](../package.json).
+
 ## Contract and decision
 
 Serve the official modern `2026-07-28` protocol and retain older stdio clients without changing archive authorization, database schema, account access or tool behavior. All five tools retain output schemas and structured/text parity. No Tasks or elicitation are needed for bounded local retrieval.

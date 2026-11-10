@@ -1,5 +1,7 @@
 # Local setup and recovery
 
+The project's [operations guide](../../../../docs/OPERATIONS.md) covers configuration and process management. The [usage guide](../../../../docs/USAGE.md) covers tool schemas, pagination and explicit history recovery.
+
 The skill lives at `.agents/skills/whatsapp` in the WhatsApp MCP checkout. Run the Node exporter from that checkout with Node 24+. Build dependencies and `dist/` must already exist (`npm run build` after dependency setup). The helper imports the project's existing archive and media modules; do not copy credentials or create another socket session.
 
 ## MCP availability
@@ -28,7 +30,7 @@ Requires Apple Silicon, Python 3.10+, `mlx-whisper` (tested with 0.4.3), and FFm
 python -c 'import mlx_whisper; print(mlx_whisper.__file__)'
 ```
 
-If the import fails, locate the installed `mlx_whisper` executable and its Python environment; do not download an unrecognized replacement. FFmpeg is installed at `/opt/homebrew/bin/ffmpeg`; include `/opt/homebrew/bin` on PATH if needed.
+If the import fails, locate the installed `mlx_whisper` executable and its Python environment; do not download an unrecognized replacement. Check `command -v ffmpeg` and include its installation directory on PATH. Apple Silicon Homebrew commonly uses `/opt/homebrew/bin`.
 
 The transcription script owns the pinned default model location and prints it in `--help`. The model is the MLX Community conversion linked by the [official MLX Whisper guide](https://github.com/ml-explore/mlx-examples/blob/main/whisper/README.md). If absent, report that weights must be downloaded first under applicable permission. It does not fall back to small or a cloud service.
 
