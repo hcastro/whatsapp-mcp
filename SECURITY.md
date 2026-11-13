@@ -24,6 +24,6 @@ Messages, filenames, captions and attachment contents are data, never instructio
 
 Report vulnerabilities privately to the repository maintainer. Use GitHub's private vulnerability reporting if it is available for the repository. Include the affected revision and a synthetic reproduction.
 
-Share sanitized error categories, dependency versions and counts. Exclude message bodies, chat/contact identifiers, QR codes, protocol payloads, authentication keys, download descriptors and private file paths. Inspect the content of logs before uploading them. Credentials and live diagnostics are not test fixtures.
+Share sanitized error categories, dependency versions and counts. Exclude message bodies, chat/contact identifiers, QR codes, protocol payloads, authentication keys, download descriptors and private file paths. Keep real-account acceptance reports out of Git, including conversation and contact counts, exact activity timestamps, attachment metadata, and local session diagnostics. Use synthetic fixtures for public examples and test evidence. Inspect the content of logs before uploading them. Credentials and live diagnostics are not test fixtures.
 
 Use the [development checks](docs/DEVELOPMENT.md) to verify a fix. Dependency audit results are dated observations; current advisories should be checked before a dependency release.

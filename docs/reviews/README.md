@@ -29,8 +29,6 @@ Four sequential GPT-6.1 Sol review-and-fix rounds, using the exact personal stra
 1. [Round 1](live-round-1.md): history provenance, deadline/cancellation, spreadsheet clipping.
 2. [Round 2](live-round-2.md): refusal fallback, delayed history, available-chat filtering.
 3. [Round 3](live-round-3.md): adversarial ZIP validation and worker termination.
-4. [Round 4](live-round-4.md): approved code; live acceptance tracked separately.
+4. [Round 4](live-round-4.md): approved code after offline regression checks.
 
 [Final check log](../live-check.log): 82 tests passing after the last fixes.
-
-## Contact-name resolution follow-up
